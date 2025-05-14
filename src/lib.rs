@@ -9,7 +9,8 @@ pub type Fr = poseidon_rs::Fr; // alias
 use arrayref::array_ref;
 
 #[cfg(not(feature = "aarch64"))]
-use blake_hash::Digest; // compatible version with Blake used at circomlib
+use blake_hash::Digest;
+use utils::modulus; // compatible version with Blake used at circomlib
 
 #[cfg(feature = "aarch64")]
 extern crate blake; // compatible version with Blake used at circomlib
@@ -341,37 +342,6 @@ impl PrivateKey {
         Ok(Signature { r_b8, s })
     }
 
-    pub fn sign_ecdsa(&self, msg: BigInt) -> Result<Signature, String> {
-        if msg > Q.clone() {
-            return Err("msg outside the Finite Field".to_string());
-        }
-        let (_, msg_bytes) = msg.to_bytes_le();
-        let msg_hash: Vec<u8> = blh(&msg_bytes);
-        let k_preimage = utils::concatenate_arrays(&self.key, &msg_hash);
-
-        let order = "21888242871839275222246405745257275088614511777268538073601725287587578984328";
-        let order_big = BigInt::from_str(order).unwrap();
-
-        let k = BigInt::from_bytes_le(Sign::Plus, &blh(&k_preimage)) % order_big.clone();
-        let R = B8.mul_scalar(&k);
-        let r = R.x;
-
-        let k_inv = match k.modinv(&order_big) {
-            Some(k_inv) => k_inv,
-            None => return Err("k inverse not found".to_string()),
-        };
-
-        assert_eq!(&k_inv * k % &order_big, BigInt::one());
-
-        let r_sk = BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap()
-            * BigInt::parse_bytes(&self.key, 16).unwrap();
-
-        let r_sk_add_h = (r_sk + BigInt::parse_bytes(&msg_hash, 16).unwrap()) % &order_big;
-        let s = (k_inv * r_sk_add_h) % &order_big;
-
-        Ok(Signature { r_b8: R, s })
-    }
-
     #[allow(clippy::many_single_char_names)]
     pub fn sign_schnorr(&self, m: BigInt) -> Result<(Point, BigInt), String> {
         // random r
@@ -415,12 +385,74 @@ pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool,
     Ok(sg.equals(right.affine()))
 }
 
+pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
+    // if msg > Q.clone() {
+    //     return Err("msg outside the Finite Field".to_string());
+    // }
+    let (_, msg_bytes) = msg.to_bytes_le();
+    let (_, key_bytes) = key.to_bytes_le();
+    let msg_hash: Vec<u8> = blh(&msg_bytes);
+    let k_preimage = utils::concatenate_arrays(&key_bytes, &msg_hash);
+
+    let k = modulus(
+        &BigInt::from_bytes_le(Sign::Plus, &blh(&k_preimage)),
+        &SUBORDER,
+    );
+    let R = B8.mul_scalar(&k);
+    let r = R.x;
+
+    let k_inv = match k.modinv(&SUBORDER) {
+        Some(k_inv) => k_inv,
+        None => return Err("k inverse not found".to_string()),
+    };
+
+    assert_eq!(modulus(&(k_inv.clone() * k), &SUBORDER), BigInt::one());
+
+    let r_sk = BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap() * key;
+
+    let r_sk_add_h = modulus(
+        &(r_sk + BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])),
+        &SUBORDER,
+    );
+    let s = modulus(&(k_inv * r_sk_add_h), &SUBORDER);
+
+    Ok(Signature { r_b8: R, s })
+}
+
+pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) {
+    let (_, msg_bytes) = msg.to_bytes_le();
+    let msg_hash: Vec<u8> = blh(&msg_bytes);
+
+    let s_inv = match sig.s.modinv(&SUBORDER) {
+        Some(s_inv) => s_inv,
+        None => panic!("s inverse not found"),
+    };
+
+    let msg_hash_s_inv =
+        B8.mul_scalar(&(s_inv.clone() * BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])));
+    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap();
+    let r_s_inv = pk.mul_scalar(&(s_inv * r));
+
+    let R = msg_hash_s_inv.projective().add(&r_s_inv.projective());
+
+    assert_eq!(sig.r_b8.equals(R.affine()), true);
+}
+
 pub fn new_key() -> PrivateKey {
     // https://tools.ietf.org/html/rfc8032#section-5.1.5
     let mut rng = rand::thread_rng();
     let sk_raw = rng.gen_biguint(1024).to_bigint().unwrap();
     let (_, sk_raw_bytes) = sk_raw.to_bytes_be();
     PrivateKey::import(sk_raw_bytes[..32].to_vec()).unwrap()
+}
+
+pub fn new_ecdsa_key() -> BigInt {
+    let mut rng = rand::thread_rng();
+
+    modulus(
+        &rng.gen_bigint_range(&BigInt::from(21341253), &SUBORDER.clone()),
+        &SUBORDER,
+    )
 }
 
 pub fn verify(pk: Point, sig: Signature, msg: BigInt) -> bool {
@@ -600,6 +632,33 @@ mod tests {
         let sig = sk.sign(msg.clone()).unwrap();
         let v = verify(pk, sig, msg);
         assert_eq!(v, true);
+    }
+
+    #[test]
+    fn test_new_key_sign_verify_0_ecdsa() {
+        let sk = new_ecdsa_key();
+        let pk = B8.mul_scalar(&sk);
+        let msg = 5.to_bigint().unwrap();
+        let sig = sign_ecdsa(msg.clone(), sk).unwrap();
+        verify_ecdsa(msg, sig, pk);
+    }
+
+    #[test]
+    fn test_new_key_sign_verify_1_ecdsa() {
+        for _ in 0..100 {
+            let sk = new_ecdsa_key();
+            let pk = B8.mul_scalar(&sk);
+
+            let mut rng = rand::thread_rng();
+
+            let msg = modulus(
+                &rng.gen_bigint_range(&BigInt::from(21341253), &SUBORDER.clone()),
+                &SUBORDER,
+            );
+
+            let sig = sign_ecdsa(msg.clone(), sk).unwrap();
+            verify_ecdsa(msg, sig, pk);
+        }
     }
 
     #[test]
