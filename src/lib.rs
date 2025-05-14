@@ -386,9 +386,6 @@ pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool,
 }
 
 pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
-    // if msg > Q.clone() {
-    //     return Err("msg outside the Finite Field".to_string());
-    // }
     let (_, msg_bytes) = msg.to_bytes_le();
     let (_, key_bytes) = key.to_bytes_le();
     let msg_hash: Vec<u8> = blh(&msg_bytes);
@@ -419,6 +416,23 @@ pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
     Ok(Signature { r_b8: R, s })
 }
 
+fn get_eff_ecdsa_args(msg: BigInt, sig: Signature) -> (Point, Point) {
+    let (_, msg_bytes) = msg.to_bytes_le();
+    let msg_hash: Vec<u8> = blh(&msg_bytes);
+    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap();
+    let r_inv = r.modinv(&SUBORDER).unwrap();
+
+    let T = sig.r_b8.mul_scalar(&r_inv);
+
+    let U = B8.mul_scalar(
+        &(modulus(
+            &(-r_inv * BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])),
+            &SUBORDER,
+        )),
+    );
+    (T, U)
+}
+
 pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) {
     let (_, msg_bytes) = msg.to_bytes_le();
     let msg_hash: Vec<u8> = blh(&msg_bytes);
@@ -436,6 +450,15 @@ pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) {
     let R = msg_hash_s_inv.projective().add(&r_s_inv.projective());
 
     assert_eq!(sig.r_b8.equals(R.affine()), true);
+}
+
+pub fn verify_eff_ecdsa(sig: Signature, t: Point, u: Point, pk: Point) {
+    let lhs = t
+        .mul_scalar(&sig.s)
+        .projective()
+        .add(&u.projective())
+        .affine();
+    assert_eq!(lhs.equals(pk), true)
 }
 
 pub fn new_key() -> PrivateKey {
@@ -638,9 +661,13 @@ mod tests {
     fn test_new_key_sign_verify_0_ecdsa() {
         let sk = new_ecdsa_key();
         let pk = B8.mul_scalar(&sk);
-        let msg = 5.to_bigint().unwrap();
+        let msg = BigInt::parse_bytes(b"123456789012345678901234567890", 10).unwrap();
         let sig = sign_ecdsa(msg.clone(), sk).unwrap();
-        verify_ecdsa(msg, sig, pk);
+        verify_ecdsa(msg.clone(), sig.clone(), pk.clone());
+
+        let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
+
+        verify_eff_ecdsa(sig, t, u, pk);
     }
 
     #[test]
@@ -657,7 +684,10 @@ mod tests {
             );
 
             let sig = sign_ecdsa(msg.clone(), sk).unwrap();
-            verify_ecdsa(msg, sig, pk);
+            verify_ecdsa(msg.clone(), sig.clone(), pk.clone());
+
+            let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
+            verify_eff_ecdsa(sig, t, u, pk);
         }
     }
 
