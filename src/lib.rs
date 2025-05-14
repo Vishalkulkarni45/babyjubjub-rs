@@ -14,7 +14,7 @@ use blake_hash::Digest; // compatible version with Blake used at circomlib
 #[cfg(feature = "aarch64")]
 extern crate blake; // compatible version with Blake used at circomlib
 
-use std::cmp::min;
+use std::{cmp::min, str::FromStr};
 
 use num_bigint::{BigInt, RandBigInt, Sign, ToBigInt};
 use num_traits::One;
@@ -339,6 +339,37 @@ impl PrivateKey {
         s %= &SUBORDER.clone();
 
         Ok(Signature { r_b8, s })
+    }
+
+    pub fn sign_ecdsa(&self, msg: BigInt) -> Result<Signature, String> {
+        if msg > Q.clone() {
+            return Err("msg outside the Finite Field".to_string());
+        }
+        let (_, msg_bytes) = msg.to_bytes_le();
+        let msg_hash: Vec<u8> = blh(&msg_bytes);
+        let k_preimage = utils::concatenate_arrays(&self.key, &msg_hash);
+
+        let order = "21888242871839275222246405745257275088614511777268538073601725287587578984328";
+        let order_big = BigInt::from_str(order).unwrap();
+
+        let k = BigInt::from_bytes_le(Sign::Plus, &blh(&k_preimage)) % order_big.clone();
+        let R = B8.mul_scalar(&k);
+        let r = R.x;
+
+        let k_inv = match k.modinv(&order_big) {
+            Some(k_inv) => k_inv,
+            None => return Err("k inverse not found".to_string()),
+        };
+
+        assert_eq!(&k_inv * k % &order_big, BigInt::one());
+
+        let r_sk = BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap()
+            * BigInt::parse_bytes(&self.key, 16).unwrap();
+
+        let r_sk_add_h = (r_sk + BigInt::parse_bytes(&msg_hash, 16).unwrap()) % &order_big;
+        let s = (k_inv * r_sk_add_h) % &order_big;
+
+        Ok(Signature { r_b8: R, s })
     }
 
     #[allow(clippy::many_single_char_names)]
