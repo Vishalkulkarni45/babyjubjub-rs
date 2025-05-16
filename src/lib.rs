@@ -419,7 +419,7 @@ pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
 fn get_eff_ecdsa_args(msg: BigInt, sig: Signature) -> (Point, Point) {
     let (_, msg_bytes) = msg.to_bytes_le();
     let msg_hash: Vec<u8> = blh(&msg_bytes);
-    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap();
+    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap() % SUBORDER.clone();
     let r_inv = r.modinv(&SUBORDER).unwrap();
 
     let T = sig.r_b8.mul_scalar(&r_inv);
@@ -444,7 +444,7 @@ pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) {
 
     let msg_hash_s_inv =
         B8.mul_scalar(&(s_inv.clone() * BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])));
-    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap();
+    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap() % SUBORDER.clone();
     let r_s_inv = pk.mul_scalar(&(s_inv * r));
 
     let R = msg_hash_s_inv.projective().add(&r_s_inv.projective());
