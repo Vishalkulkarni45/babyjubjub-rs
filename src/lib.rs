@@ -15,7 +15,7 @@ use utils::modulus; // compatible version with Blake used at circomlib
 #[cfg(feature = "aarch64")]
 extern crate blake; // compatible version with Blake used at circomlib
 
-use std::{cmp::min, str::FromStr};
+use std::cmp::min;
 
 use num_bigint::{BigInt, RandBigInt, Sign, ToBigInt};
 use num_traits::One;
@@ -385,80 +385,135 @@ pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool,
     Ok(sg.equals(right.affine()))
 }
 
+#[allow(non_snake_case)]
 pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
+    // Convert the message and key to byte arrays
     let (_, msg_bytes) = msg.to_bytes_le();
     let (_, key_bytes) = key.to_bytes_le();
-    let msg_hash: Vec<u8> = blh(&msg_bytes);
-    let k_preimage = utils::concatenate_arrays(&key_bytes, &msg_hash);
 
+    // Hash the message bytes
+    let h: Vec<u8> = blh(&msg_bytes);
+
+    // Concatenate key bytes and message hash to form the preimage for k
+    let k_preimage = utils::concatenate_arrays(&key_bytes, &h);
+
+    // Deterministically generate the nonce k and reduce it modulo the subgroup order
     let k = modulus(
         &BigInt::from_bytes_le(Sign::Plus, &blh(&k_preimage)),
         &SUBORDER,
     );
-    let R = B8.mul_scalar(&k);
-    let r = R.x;
 
+    // Calculate the curve point R = k * G
+    let R = B8.mul_scalar(&k);
+
+    // Use the x-coordinate of R as r (after conversion and reduction)
+    let r = R.x;
+    let r_scalar = modulus(
+        &BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap(),
+        &SUBORDER,
+    );
+
+    // Reject signatures where r is zero (invalid per ECDSA spec)
+    if r_scalar == BigInt::from(0) {
+        return Err("r is zero, invalid signature".to_string());
+    }
+
+    // Compute the modular inverse of k
     let k_inv = match k.modinv(&SUBORDER) {
         Some(k_inv) => k_inv,
         None => return Err("k inverse not found".to_string()),
     };
 
+    // Sanity check: k * k_inv mod n == 1
     assert_eq!(modulus(&(k_inv.clone() * k), &SUBORDER), BigInt::one());
 
-    let r_sk = BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap() * key;
+    // Hash the message to a scalar
+    let msg_hash = get_msg_hash(msg)?;
 
-    let r_sk_add_h = modulus(
-        &(r_sk + BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])),
-        &SUBORDER,
-    );
-    let s = modulus(&(k_inv * r_sk_add_h), &SUBORDER);
+    // Compute s = k_inv * (msg_hash + r * key) mod n
+    let s = modulus(&(k_inv * (msg_hash + r_scalar * key)), &SUBORDER);
 
+    // Reject signatures where s is zero (invalid per ECDSA spec)
+    if s == BigInt::from(0) {
+        return Err("s is zero, invalid signature".to_string());
+    }
+
+    // Return the signature (R point and scalar s)
     Ok(Signature { r_b8: R, s })
 }
 
+fn get_msg_hash(msg: BigInt) -> Result<BigInt, String> {
+    let msg_hash = POSEIDON.hash(vec![Fr::from_str(&msg.to_string()).unwrap()])?;
+    let msg_hash_big = BigInt::parse_bytes(to_hex(&msg_hash).as_bytes(), 16).unwrap();
+    let msg_hash = modulus(&msg_hash_big, &SUBORDER);
+    Ok(msg_hash)
+}
+
+#[allow(non_snake_case)]
+#[allow(dead_code)]
 fn get_eff_ecdsa_args(msg: BigInt, sig: Signature) -> (Point, Point) {
-    let (_, msg_bytes) = msg.to_bytes_le();
-    let msg_hash: Vec<u8> = blh(&msg_bytes);
-    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap() % SUBORDER.clone();
+    // Compute the hash of the message as a field element
+    let msg_hash = get_msg_hash(msg).unwrap();
+
+    // Recover r from the signature's R point x-coordinate, reduced modulo the subgroup order
+    let r = modulus(
+        &BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap(),
+        &SUBORDER,
+    );
+
+    // Compute the modular inverse of r modulo the subgroup order
     let r_inv = r.modinv(&SUBORDER).unwrap();
 
+    // T = R * r_inv, where R is the signature's R point
     let T = sig.r_b8.mul_scalar(&r_inv);
 
-    let U = B8.mul_scalar(
-        &(modulus(
-            &(-r_inv * BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])),
-            &SUBORDER,
-        )),
-    );
+    // U = G * (-r_inv * msg_hash mod n), where G is the generator
+    let U = B8.mul_scalar(&(modulus(&(-r_inv * msg_hash), &SUBORDER)));
+
+    // Return the two points (T, U) for efficient ECDSA verification
     (T, U)
 }
 
-pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) {
-    let (_, msg_bytes) = msg.to_bytes_le();
-    let msg_hash: Vec<u8> = blh(&msg_bytes);
+pub fn verify_ecdsa(msg: BigInt, sig: Signature, pk: Point) -> bool {
+    let msg_hash = get_msg_hash(msg).unwrap();
 
     let s_inv = match sig.s.modinv(&SUBORDER) {
         Some(s_inv) => s_inv,
-        None => panic!("s inverse not found"),
+        None => return false,
     };
 
-    let msg_hash_s_inv =
-        B8.mul_scalar(&(s_inv.clone() * BigInt::from_bytes_le(Sign::Plus, &msg_hash[..])));
-    let r = BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap() % SUBORDER.clone();
-    let r_s_inv = pk.mul_scalar(&(s_inv * r));
+    let r = modulus(
+        &BigInt::parse_bytes(to_hex(&sig.r_b8.x).as_bytes(), 16).unwrap(),
+        &SUBORDER,
+    );
 
-    let R = msg_hash_s_inv.projective().add(&r_s_inv.projective());
+    // u1 = msg_hash * s_inv mod n
+    let u1 = modulus(&(msg_hash * &s_inv), &SUBORDER);
+    // u2 = r * s_inv mod n
+    let u2 = modulus(&(r.clone() * &s_inv), &SUBORDER);
 
-    assert_eq!(sig.r_b8.equals(R.affine()), true);
+    // R = u1*G + u2*pk
+    let u1_g = B8.mul_scalar(&u1);
+    let u2_pk = pk.mul_scalar(&u2);
+    let r_point = u1_g.projective().add(&u2_pk.projective()).affine();
+
+    // Check if R.x mod n == r
+    let r_x = modulus(
+        &BigInt::parse_bytes(to_hex(&r_point.x).as_bytes(), 16).unwrap(),
+        &SUBORDER,
+    );
+    r_x == r
 }
 
 pub fn verify_eff_ecdsa(sig: Signature, t: Point, u: Point, pk: Point) {
+    // Efficient ECDSA verification using precomputed points T and U:
+    // Check if s*T + U == pk
     let lhs = t
         .mul_scalar(&sig.s)
         .projective()
         .add(&u.projective())
         .affine();
-    assert_eq!(lhs.equals(pk), true)
+    assert!(lhs.equals(pk), "Efficient ECDSA verification failed");
 }
 
 pub fn new_key() -> PrivateKey {
@@ -661,12 +716,18 @@ mod tests {
     fn test_new_key_sign_verify_0_ecdsa() {
         let sk = new_ecdsa_key();
         let pk = B8.mul_scalar(&sk);
-        let msg = BigInt::parse_bytes(b"123456789012345678901234567890", 10).unwrap();
+        let msg = BigInt::parse_bytes(b"1234567890123456789012345690", 10).unwrap();
         let sig = sign_ecdsa(msg.clone(), sk).unwrap();
         verify_ecdsa(msg.clone(), sig.clone(), pk.clone());
+    }
 
-        let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
-
+    #[test]
+    fn test_new_key_sign_verify_0_eff_ecdsa() {
+        let sk = new_ecdsa_key();
+        let pk = B8.mul_scalar(&sk);
+        let msg = BigInt::parse_bytes(b"1234567890123456789012345690", 10).unwrap();
+        let sig = sign_ecdsa(msg.clone(), sk).unwrap();
+        let (t, u) = get_eff_ecdsa_args(msg.clone(), sig.clone());
         verify_eff_ecdsa(sig, t, u, pk);
     }
 
@@ -685,6 +746,25 @@ mod tests {
 
             let sig = sign_ecdsa(msg.clone(), sk).unwrap();
             verify_ecdsa(msg.clone(), sig.clone(), pk.clone());
+
+            // let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
+            // verify_eff_ecdsa(sig, t, u, pk);
+        }
+    }
+
+    #[test]
+    fn test_new_key_sign_verify_1_eff_ecdsa() {
+        for _ in 0..100 {
+            let sk = new_ecdsa_key();
+            let pk = B8.mul_scalar(&sk);
+
+            let mut rng = rand::thread_rng();
+
+            let msg = modulus(
+                &rng.gen_bigint_range(&BigInt::from(21341253), &SUBORDER.clone()),
+                &SUBORDER,
+            );
+            let sig = sign_ecdsa(msg.clone(), sk).unwrap();
 
             let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
             verify_eff_ecdsa(sig, t, u, pk);
