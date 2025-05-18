@@ -2,11 +2,13 @@
 // For LICENSE check https://github.com/arnaucube/babyjubjub-rs
 use ark_bn254::Fr;
 use num::BigUint;
+use params::circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS;
+use poseidon_rust::poseidon::Poseidon;
 use std::str::FromStr;
 
 use ark_ff::*;
 
-pub type ArkBigInt = <ark_bn254::Fr as ark_ff::PrimeField>::BigInt;
+//pub type ArkBigInt = <ark_bn254::Fr as ark_ff::PrimeField>::BigInt;
 use arrayref::array_ref;
 
 #[cfg(not(feature = "aarch64"))]
@@ -18,17 +20,16 @@ extern crate blake; // compatible version with Blake used at circomlib
 
 use std::cmp::min;
 
-use num_bigint::{BigInt, Sign, ToBigInt};
+use num_bigint::{BigInt, RandBigInt, Sign, ToBigInt};
 use num_traits::One;
 
 use generic_array::GenericArray;
 
-pub mod utils;
 pub mod params;
-
+pub mod utils;
 
 use lazy_static::lazy_static;
-
+//TODO: Replace BigInt with BigUint
 lazy_static! {
     static ref D: Fr = Fr::from_str("168696").unwrap();
     static ref D_BIG: BigInt = BigInt::from(168696 as u64 );
@@ -61,8 +62,6 @@ lazy_static! {
         .unwrap()
         >> 3;
 }
-
-
 
 #[derive(Clone, Debug)]
 pub struct PointProjective {
@@ -172,13 +171,15 @@ impl Point {
     pub fn compress(&self) -> [u8; 32] {
         let p = &self;
         let mut r: [u8; 32] = [0; 32];
-        let x_big:ArkBigInt = p.x.into_bigint();
-        let y_big :ArkBigInt=  p.y.into_bigint();
-        let y_bytes = y_big.to_bytes_le();
+        let x_biguint: BigUint = p.x.into_bigint().into();
+        let x_big = x_biguint.to_bigint().unwrap();
+        let y_biguint: BigUint = p.y.into_bigint().into();
+        let y_big = y_biguint.to_bigint().unwrap();
+        let (_, y_bytes) = y_big.to_bytes_le();
         let len = min(y_bytes.len(), r.len());
         r[..len].copy_from_slice(&y_bytes[..len]);
 
-        let q_shift:BigUint = Q.clone().to_biguint().unwrap() >> 1;
+        let q_shift: BigUint = Q.clone().to_biguint().unwrap() >> 1;
         if x_big > q_shift.try_into().unwrap() {
             r[31] |= 0x80;
         }
@@ -279,7 +280,7 @@ pub struct PrivateKey {
     pub key: [u8; 32],
 }
 
- impl PrivateKey {
+impl PrivateKey {
     pub fn import(b: Vec<u8>) -> Result<PrivateKey, String> {
         if b.len() != 32 {
             return Err(String::from("imported key can not be bigger than 32 bytes"));
@@ -313,93 +314,96 @@ pub struct PrivateKey {
         B8.mul_scalar(&self.scalar_key())
     }
 
-//     pub fn sign(&self, msg: BigInt) -> Result<Signature, String> {
-//         if msg > Q.clone() {
-//             return Err("msg outside the Finite Field".to_string());
-//         }
-//         // let (_, sk_bytes) = self.key.to_bytes_le();
-//         // let mut hasher = Blake2b::new();
-//         // hasher.update(sk_bytes);
-//         // let mut h = hasher.finalize(); // h: hash(sk), s: h[32:64]
-//         let mut h: Vec<u8> = blh(&self.key);
+    pub fn sign(&self, msg: BigInt) -> Result<Signature, String> {
+        if msg > Q.clone() {
+            return Err("msg outside the Finite Field".to_string());
+        }
+        // let (_, sk_bytes) = self.key.to_bytes_le();
+        // let mut hasher = Blake2b::new();
+        // hasher.update(sk_bytes);
+        // let mut h = hasher.finalize(); // h: hash(sk), s: h[32:64]
+        let mut h: Vec<u8> = blh(&self.key);
 
-//         let (_, msg_bytes) = msg.to_bytes_le();
-//         let mut msg32: [u8; 32] = [0; 32];
-//         msg32[..msg_bytes.len()].copy_from_slice(&msg_bytes[..]);
-//         let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
+        let (_, msg_bytes) = msg.to_bytes_le();
+        let mut msg32: [u8; 32] = [0; 32];
+        msg32[..msg_bytes.len()].copy_from_slice(&msg_bytes[..]);
+        let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
 
-//         // https://tools.ietf.org/html/rfc8032#section-5.1.6
-//         let s = GenericArray::<u8, generic_array::typenum::U32>::from_mut_slice(&mut h[32..64]);
-//         let r_bytes = utils::concatenate_arrays(s, &msg32);
-//         let r_hashed: Vec<u8> = blh(&r_bytes);
-//         let mut r = BigInt::from_bytes_le(Sign::Plus, &r_hashed[..]);
-//         r = utils::modulus(&r, &SUBORDER);
-//         let r_b8: Point = B8.mul_scalar(&r);
-//         let a = &self.public();
+        // https://tools.ietf.org/html/rfc8032#section-5.1.6
+        let s = GenericArray::<u8, generic_array::typenum::U32>::from_mut_slice(&mut h[32..64]);
+        let r_bytes = utils::concatenate_arrays(s, &msg32);
+        let r_hashed: Vec<u8> = blh(&r_bytes);
+        let mut r = BigInt::from_bytes_le(Sign::Plus, &r_hashed[..]);
+        r = utils::modulus(&r, &SUBORDER);
+        let r_b8: Point = B8.mul_scalar(&r);
+        let a = &self.public();
 
-//         let hm_input = vec![r_b8.x, r_b8.y, a.x, a.y, msg_fr];
-//         let hm = POSEIDON.hash(hm_input)?;
+        let hm_input = vec![r_b8.x, r_b8.y, a.x, a.y, msg_fr];
+        let posedion_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
+        let hm: Fr = posedion_hash_5.permutation(hm_input).unwrap()[0];
 
-//         let mut s = &self.scalar_key() << 3;
-//         let hm_b = BigInt::parse_bytes(to_hex(&hm).as_bytes(), 16).unwrap();
-//         s = hm_b * s;
-//         s = r + s;
-//         s %= &SUBORDER.clone();
+        let mut s = &self.scalar_key() << 3;
+        let hm_bu: BigUint = hm.into_bigint().into();
+        let hm_b = hm_bu.to_bigint().unwrap();
+        s = hm_b * s;
+        s = r + s;
+        s %= &SUBORDER.clone();
 
-//         Ok(Signature { r_b8, s })
-//     }
+        Ok(Signature { r_b8, s })
+    }
 
-//     #[allow(clippy::many_single_char_names)]
-//     pub fn sign_schnorr(&self, m: BigInt) -> Result<(Point, BigInt), String> {
-//         // random r
-//         let mut rng = rand::thread_rng();
-//         let k = rng.gen_biguint(1024).to_bigint().unwrap();
+    #[allow(clippy::many_single_char_names)]
+    pub fn sign_schnorr(&self, m: BigInt) -> Result<(Point, BigInt), String> {
+        // random r
+        let mut rng = rand::thread_rng();
+        let k = rng.gen_biguint(1024).to_bigint().unwrap();
 
-//         // r = k·G
-//         let r = B8.mul_scalar(&k);
+        // r = k·G
+        let r = B8.mul_scalar(&k);
 
-//         // h = H(x, r, m)
-//         let pk = self.public();
-//         let h = schnorr_hash(&pk, m, &r)?;
+        // h = H(x, r, m)
+        let pk = self.public();
+        let h = schnorr_hash(&pk, m, &r)?;
 
-//         // s= k+x·h
-//         let sk_scalar = self.scalar_key();
-//         let s = k + &sk_scalar * &h;
-//         Ok((r, s))
-//     }
- }
+        // s= k+x·h
+        let sk_scalar = self.scalar_key();
+        let s = k + &sk_scalar * &h;
+        Ok((r, s))
+    }
+}
 
-// pub fn schnorr_hash(pk: &Point, msg: BigInt, c: &Point) -> Result<BigInt, String> {
-//     if msg > Q.clone() {
-//         return Err("msg outside the Finite Field".to_string());
-//     }
-//     let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
-//     let hm_input = vec![pk.x, pk.y, c.x, c.y, msg_fr];
-//     let h = POSEIDON.hash(hm_input)?;
-//     let h_b = BigInt::parse_bytes(to_hex(&h).as_bytes(), 16).unwrap();
-//     Ok(h_b)
-// }
+pub fn schnorr_hash(pk: &Point, msg: BigInt, c: &Point) -> Result<BigInt, String> {
+    if msg > Q.clone() {
+        return Err("msg outside the Finite Field".to_string());
+    }
+    let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
+    let hm_input = vec![pk.x, pk.y, c.x, c.y, msg_fr];
+    let posedion_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
+    let hm: Fr = posedion_hash_5.permutation(hm_input).unwrap()[0];
 
-// pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool, String> {
-//     // sG = s·G
-//     let sg = B8.mul_scalar(&s);
+    let hm_bu: BigUint = hm.into_bigint().into();
+    Ok(hm_bu.to_bigint().unwrap())
+}
 
-//     // r + h · x
-//     let h = schnorr_hash(&pk, m, &r)?;
-//     let pk_h = pk.mul_scalar(&h);
-//     let right = r.projective().add(&pk_h.projective());
+pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool, String> {
+    // sG = s·G
+    let sg = B8.mul_scalar(&s);
 
-//     Ok(sg.equals(right.affine()))
-// }
+    // r + h · x
+    let h = schnorr_hash(&pk, m, &r)?;
+    let pk_h = pk.mul_scalar(&h);
+    let right = r.projective().add(&pk_h.projective());
+
+    Ok(sg.equals(right.affine()))
+}
 
 // #[allow(non_snake_case)]
-// pub fn sign_ecdsa(msg: BigInt, key: BigInt) -> Result<Signature, String> {
+// pub fn sign_ecdsa(msg: Vec<u8>, key: BigInt) -> Result<Signature, String> {
 //     // Convert the message and key to byte arrays
-//     let (_, msg_bytes) = msg.to_bytes_le();
 //     let (_, key_bytes) = key.to_bytes_le();
 
 //     // Hash the message bytes
-//     let h: Vec<u8> = blh(&msg_bytes);
+//     let h: Vec<u8> = blh(&msg);
 
 //     // Concatenate key bytes and message hash to form the preimage for k
 //     let k_preimage = utils::concatenate_arrays(&key_bytes, &h);
@@ -415,8 +419,9 @@ pub struct PrivateKey {
 
 //     // Use the x-coordinate of R as r (after conversion and reduction)
 //     let r = R.x;
+//     let r_bu:BigUint = r.into_bigint().into();
 //     let r_scalar = modulus(
-//         &BigInt::parse_bytes(to_hex(&r).as_bytes(), 16).unwrap(),
+//         &r_bu.to_bigint().unwrap(),
 //         &SUBORDER,
 //     );
 

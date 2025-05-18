@@ -1,23 +1,36 @@
 // BabyJubJub elliptic curve implementation in Rust.
 // For LICENSE check https://github.com/arnaucube/babyjubjub-rs
 
+use ark_bn254::Fr;
 use ark_ff::*;
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, Zero};
+use std::str::FromStr;
 
-use crate::ArkBigInt;
+
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
 
-// pub fn bigint_to_ark_bigint(input:BigInt) -> Result<ArkBigInt, String> {
-//     if input.sign() == num_bigint::Sign::Minus {
-//         return Err("Cannot convert negative BigInt to ArkBigInt".to_string());
-//     }
-//     let (_, bytes) = input.to_bytes_le();
-//     Ok(ArkBigInt::from_(&bytes))
+// pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
+//     let msg_bytes_fr = msg_bytes
+//         .into_iter()
+//         .map(|x| Fr::from_str(&x.to_string()).unwrap())
+//         .collect::<Vec<Fr>>();
+
+
+//     let msg_hash = POSEIDON.hash(vec![Fr::from_str(&msg_big.to_string()).unwrap()])?;
+
+//     let msg_hash_big = BigInt::parse_bytes(to_hex(&msg_hash).as_bytes(), 16).unwrap();
+//     let msg_hash = modulus(&msg_hash_big, &SUBORDER);
+//     Ok(msg_hash)
 // }
+
+// Poseidon(16) -- 18 rounds  16 * 18 = 288
+// Posedion(10) -- 1 round   10 * 1 = 10 , total = 298 
+
+
 
 pub fn modinv(a: &BigInt, q: &BigInt) -> Result<BigInt, String> {
     let big_zero: BigInt = Zero::zero();
