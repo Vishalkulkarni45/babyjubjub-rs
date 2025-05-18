@@ -1,12 +1,23 @@
 // BabyJubJub elliptic curve implementation in Rust.
 // For LICENSE check https://github.com/arnaucube/babyjubjub-rs
 
+use ark_ff::*;
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, Zero};
+
+use crate::ArkBigInt;
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
+
+// pub fn bigint_to_ark_bigint(input:BigInt) -> Result<ArkBigInt, String> {
+//     if input.sign() == num_bigint::Sign::Minus {
+//         return Err("Cannot convert negative BigInt to ArkBigInt".to_string());
+//     }
+//     let (_, bytes) = input.to_bytes_le();
+//     Ok(ArkBigInt::from_(&bytes))
+// }
 
 pub fn modinv(a: &BigInt, q: &BigInt) -> Result<BigInt, String> {
     let big_zero: BigInt = Zero::zero();
@@ -259,3 +270,13 @@ mod tests {
         );
     }
 }
+
+
+    // pub fn to_hex<F: PrimeField>(el: &F) -> String {
+    //     let repr = el.into_repr();
+    //     let required_length = repr.as_ref().len() * 8;
+    //     let mut buf: Vec<u8> = vec![0; required_length]; // Initialize with the correct length
+    //     repr.write_be(&mut buf).unwrap();
+
+    //     hex_ext::encode(&buf)
+    // }
