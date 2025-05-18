@@ -2,7 +2,7 @@
 // For LICENSE check https://github.com/arnaucube/babyjubjub-rs
 use ark_bn254::Fr;
 use num::BigUint;
-use params::circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS;
+use params::circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS;
 use poseidon_rust::poseidon::Poseidon;
 use std::str::FromStr;
 
@@ -339,8 +339,8 @@ impl PrivateKey {
         let a = &self.public();
 
         let hm_input = vec![r_b8.x, r_b8.y, a.x, a.y, msg_fr];
-        let posedion_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
-        let hm: Fr = posedion_hash_5.permutation(hm_input).unwrap()[0];
+        let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS);
+        let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
 
         let mut s = &self.scalar_key() << 3;
         let hm_bu: BigUint = hm.into_bigint().into();
@@ -378,8 +378,8 @@ pub fn schnorr_hash(pk: &Point, msg: BigInt, c: &Point) -> Result<BigInt, String
     }
     let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
     let hm_input = vec![pk.x, pk.y, c.x, c.y, msg_fr];
-    let posedion_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
-    let hm: Fr = posedion_hash_5.permutation(hm_input).unwrap()[0];
+    let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS);
+    let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
 
     let hm_bu: BigUint = hm.into_bigint().into();
     Ok(hm_bu.to_bigint().unwrap())

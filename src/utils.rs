@@ -5,9 +5,12 @@ use ark_bn254::Fr;
 use ark_ff::*;
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, Zero};
+use poseidon_rust::poseidon::Poseidon;
 use std::str::FromStr;
 
-
+use crate::params::{
+    circom_t10::POSEIDON_CIRCOM_BN_10_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
+};
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
@@ -19,7 +22,6 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
 //         .map(|x| Fr::from_str(&x.to_string()).unwrap())
 //         .collect::<Vec<Fr>>();
 
-
 //     let msg_hash = POSEIDON.hash(vec![Fr::from_str(&msg_big.to_string()).unwrap()])?;
 
 //     let msg_hash_big = BigInt::parse_bytes(to_hex(&msg_hash).as_bytes(), 16).unwrap();
@@ -27,10 +29,44 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
 //     Ok(msg_hash)
 // }
 
-// Poseidon(16) -- 18 rounds  16 * 18 = 288
-// Posedion(10) -- 1 round   10 * 1 = 10 , total = 298 
+// Poseidon(16) -- 18 rounds ==>  18 * 16 = 288 , output 18 Fr
+// total preimage left ==> 18 + 10 = 28 , use poseidon(16) and poseidon(12)
+// output poseidon(2) ==> 1
+fn compute_hash_298_bytes(input: Vec<Fr>) {
+    assert!(input.len() == 298, "Input lenght must be 298 bytes");
 
+    let poseidon_hash_16 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
+    let mut inter_pos_1_16 = Vec::<Fr>::new();
+    for i in 0..18 {
+        inter_pos_1_16.push(
+            poseidon_hash_16
+                .permutation(input[i * 16..(i + 1) * 16].to_vec())
+                .unwrap()[0],
+        );
+    }
+    let inter_pos_2_16 = poseidon_hash_16
+        .permutation(inter_pos_1_16[0..16].to_vec())
+        .unwrap()[0];
 
+    //Replace params with 12
+    let poseidon_hash_12 = Poseidon::new(&POSEIDON_CIRCOM_BN_10_PARAMS);
+    let inter_pos_2_12 = poseidon_hash_12
+        .permutation(
+            inter_pos_1_16[16..]
+                .iter()
+                .chain(input[18 * 16..].iter())
+                .cloned()
+                .collect::<Vec<Fr>>(),
+        )
+        .unwrap()[0];
+
+    //Replace params with 2
+    let poseidon_hash_2 = Poseidon::new(&POSEIDON_CIRCOM_BN_10_PARAMS);
+
+    let out = poseidon_hash_2
+        .permutation([inter_pos_2_16, inter_pos_2_12].to_vec())
+        .unwrap()[0];
+}
 
 pub fn modinv(a: &BigInt, q: &BigInt) -> Result<BigInt, String> {
     let big_zero: BigInt = Zero::zero();
@@ -284,12 +320,11 @@ mod tests {
     }
 }
 
+// pub fn to_hex<F: PrimeField>(el: &F) -> String {
+//     let repr = el.into_repr();
+//     let required_length = repr.as_ref().len() * 8;
+//     let mut buf: Vec<u8> = vec![0; required_length]; // Initialize with the correct length
+//     repr.write_be(&mut buf).unwrap();
 
-    // pub fn to_hex<F: PrimeField>(el: &F) -> String {
-    //     let repr = el.into_repr();
-    //     let required_length = repr.as_ref().len() * 8;
-    //     let mut buf: Vec<u8> = vec![0; required_length]; // Initialize with the correct length
-    //     repr.write_be(&mut buf).unwrap();
-
-    //     hex_ext::encode(&buf)
-    // }
+//     hex_ext::encode(&buf)
+// }
