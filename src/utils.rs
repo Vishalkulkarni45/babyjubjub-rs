@@ -3,31 +3,36 @@
 
 use ark_bn254::Fr;
 use ark_ff::*;
+use num::BigUint;
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, Zero};
 use poseidon_rust::{bn254::circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS, poseidon::Poseidon};
 use std::str::FromStr;
 
-use crate::params::{
-    circom_t13::POSEIDON_CIRCOM_BN_13_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
+use crate::{
+    params::{
+        circom_t12::POSEIDON_CIRCOM_BN_12_PARAMS, circom_t16::POSEIDON_CIRCOM_BN_16_PARAMS,
+        circom_t2::POSEIDON_CIRCOM_BN_2_PARAMS,
+    },
+    SUBORDER,
 };
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
 
-// pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
-//     let msg_bytes_fr = msg_bytes
-//         .into_iter()
-//         .map(|x| Fr::from_str(&x.to_string()).unwrap())
-//         .collect::<Vec<Fr>>();
+pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
+    let msg_bytes_fr = msg_bytes
+        .into_iter()
+        .map(|x| Fr::from_str(&x.to_string()).unwrap())
+        .collect::<Vec<Fr>>();
 
-//     let msg_hash = POSEIDON.hash(vec![Fr::from_str(&msg_big.to_string()).unwrap()])?;
+    let msg_hash: BigUint = compute_hash_298_bytes(msg_bytes_fr).into_bigint().into();
 
-//     let msg_hash_big = BigInt::parse_bytes(to_hex(&msg_hash).as_bytes(), 16).unwrap();
-//     let msg_hash = modulus(&msg_hash_big, &SUBORDER);
-//     Ok(msg_hash)
-// }
+    let msg_hash_big = msg_hash.to_bigint().unwrap();
+    let msg_hash = modulus(&msg_hash_big, &SUBORDER);
+    Ok(msg_hash)
+}
 
 // Poseidon(16) -- 18 rounds ==>  18 * 16 = 288 , output 18 Fr
 // total preimage left ==> 18 + 10 = 28 , use poseidon(16) and poseidon(12)
@@ -35,21 +40,19 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
 fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
     assert!(input.len() == 298, "Input lenght must be 298 bytes");
 
-    let poseidon_hash_16 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
-    let mut inter_pos_1_16 = Vec::<Fr>::new();
-    for i in 0..18 {
-        inter_pos_1_16.push(
-            poseidon_hash_16
-                .permutation(input[i * 16..(i + 1) * 16].to_vec())
-                .unwrap()[0],
-        );
+    let poseidon_hash_16 = Poseidon::new(&POSEIDON_CIRCOM_BN_16_PARAMS);
+    let mut inter_pos_1_16 = Vec::<Fr>::with_capacity(18);
+
+    for chunk in input[..288].chunks(16) {
+        inter_pos_1_16.push(poseidon_hash_16.permutation(chunk.to_vec()).unwrap()[0])
     }
+
     let inter_pos_2_16 = poseidon_hash_16
         .permutation(inter_pos_1_16[0..16].to_vec())
         .unwrap()[0];
 
     //Replace params with 12
-    let poseidon_hash_12 = Poseidon::new(&POSEIDON_CIRCOM_BN_13_PARAMS);
+    let poseidon_hash_12 = Poseidon::new(&POSEIDON_CIRCOM_BN_12_PARAMS);
     let inter_pos_2_12 = poseidon_hash_12
         .permutation(
             inter_pos_1_16[16..]
@@ -61,7 +64,7 @@ fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
         .unwrap()[0];
 
     //Replace params with 2
-    let poseidon_hash_2 = Poseidon::new(&POSEIDON_CIRCOM_BN_3_PARAMS);
+    let poseidon_hash_2 = Poseidon::new(&POSEIDON_CIRCOM_BN_2_PARAMS);
 
     poseidon_hash_2
         .permutation([inter_pos_2_16, inter_pos_2_12].to_vec())
@@ -285,7 +288,7 @@ pub fn legendre_symbol(a: &BigInt, q: &BigInt) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use rand::Rng;
     #[test]
     fn test_mod_inverse() {
         let a = BigInt::parse_bytes(b"123456789123456789123456789123456789123456789", 10).unwrap();
@@ -317,6 +320,15 @@ mod tests {
             (modsqrt_v2(&a, &q).unwrap()).to_string(),
             "5464794816676661649783249706827271879994893912039750480019443499440603127256"
         );
+    }
+    #[test]
+    fn test_get_msg_hash() {
+        let mut rng = rand::thread_rng();
+        let random_input: Vec<Fr> = (0..298)
+            .map(|_| Fr::from_str(&rng.gen::<u8>().to_string()).unwrap())
+            .collect();
+        let msg_hash = compute_hash_298_bytes(random_input);
+        println!("hash : {:?}", msg_hash);
     }
 }
 
