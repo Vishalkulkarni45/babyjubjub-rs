@@ -759,65 +759,65 @@ mod tests {
         assert_eq!(p.y, p2.y);
     }
 
-    //     #[test]
-    //     fn test_point_decompress0() {
-    //         let y_bytes_raw =
-    //             hex::decode("b5328f8791d48f20bec6e481d91c7ada235f1facf22547901c18656b6c3e042f")
-    //                 .unwrap();
-    //         let mut y_bytes: [u8; 32] = [0; 32];
-    //         y_bytes.copy_from_slice(&y_bytes_raw);
-    //         let p = decompress_point(y_bytes).unwrap();
+        #[test]
+        fn test_point_decompress0() {
+            let y_bytes_raw =
+                hex::decode("b5328f8791d48f20bec6e481d91c7ada235f1facf22547901c18656b6c3e042f")
+                    .unwrap();
+            let mut y_bytes: [u8; 32] = [0; 32];
+            y_bytes.copy_from_slice(&y_bytes_raw);
+            let p = decompress_point(y_bytes).unwrap();
 
-    //         let expected_px_raw =
-    //             hex::decode("b86cc8d9c97daef0afe1a4753c54fb2d8a530dc74c7eee4e72b3fdf2496d2113")
-    //                 .unwrap();
-    //         let mut e_px_bytes: [u8; 32] = [0; 32];
-    //         e_px_bytes.copy_from_slice(&expected_px_raw);
-    //         let expected_px: Fr =
-    //             Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
-    //         assert_eq!(&p.x, &expected_px);
-    //     }
+            let expected_px_raw =
+                hex::decode("b86cc8d9c97daef0afe1a4753c54fb2d8a530dc74c7eee4e72b3fdf2496d2113")
+                    .unwrap();
+            let mut e_px_bytes: [u8; 32] = [0; 32];
+            e_px_bytes.copy_from_slice(&expected_px_raw);
+            let expected_px: Fr =
+                Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
+            assert_eq!(&p.x, &expected_px);
+        }
 
-    //     #[test]
-    //     fn test_point_decompress1() {
-    //         let y_bytes_raw =
-    //             hex::decode("70552d3ff548e09266ded29b33ce75139672b062b02aa66bb0d9247ffecf1d0b")
-    //                 .unwrap();
-    //         let mut y_bytes: [u8; 32] = [0; 32];
-    //         y_bytes.copy_from_slice(&y_bytes_raw);
-    //         let p = decompress_point(y_bytes).unwrap();
+        #[test]
+        fn test_point_decompress1() {
+            let y_bytes_raw =
+                hex::decode("70552d3ff548e09266ded29b33ce75139672b062b02aa66bb0d9247ffecf1d0b")
+                    .unwrap();
+            let mut y_bytes: [u8; 32] = [0; 32];
+            y_bytes.copy_from_slice(&y_bytes_raw);
+            let p = decompress_point(y_bytes).unwrap();
 
-    //         let expected_px_raw =
-    //             hex::decode("30f1635ba7d56f9cb32c3ffbe6dca508a68c7f43936af11a23c785ce98cb3404")
-    //                 .unwrap();
-    //         let mut e_px_bytes: [u8; 32] = [0; 32];
-    //         e_px_bytes.copy_from_slice(&expected_px_raw);
-    //         let expected_px: Fr =
-    //             Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
-    //         assert_eq!(&p.x, &expected_px);
-    //     }
+            let expected_px_raw =
+                hex::decode("30f1635ba7d56f9cb32c3ffbe6dca508a68c7f43936af11a23c785ce98cb3404")
+                    .unwrap();
+            let mut e_px_bytes: [u8; 32] = [0; 32];
+            e_px_bytes.copy_from_slice(&expected_px_raw);
+            let expected_px: Fr =
+                Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
+            assert_eq!(&p.x, &expected_px);
+        }
 
-    //     #[test]
-    //     fn test_point_decompress_loop() {
-    //         for _ in 0..5 {
-    //             let random_bytes = rand::thread_rng().gen::<[u8; 32]>();
-    //             let sk_raw: BigInt = BigInt::from_bytes_le(Sign::Plus, &random_bytes[..]);
-    //             let (_, sk_raw_bytes) = sk_raw.to_bytes_be();
-    //             let mut h: Vec<u8> = blh(&sk_raw_bytes);
+        #[test]
+        fn test_point_decompress_loop() {
+            for _ in 0..5 {
+                let random_bytes = rand::thread_rng().gen::<[u8; 32]>();
+                let sk_raw: BigInt = BigInt::from_bytes_le(Sign::Plus, &random_bytes[..]);
+                let (_, sk_raw_bytes) = sk_raw.to_bytes_be();
+                let mut h: Vec<u8> = blh(&sk_raw_bytes);
 
-    //             h[0] = h[0] & 0xF8;
-    //             h[31] = h[31] & 0x7F;
-    //             h[31] = h[31] | 0x40;
+                h[0] = h[0] & 0xF8;
+                h[31] = h[31] & 0x7F;
+                h[31] = h[31] | 0x40;
 
-    //             let sk = BigInt::from_bytes_le(Sign::Plus, &h[..]);
-    //             let point = B8.mul_scalar(&sk);
-    //             let cmp_point = point.compress();
-    //             let dcmp_point = decompress_point(cmp_point).unwrap();
+                let sk = BigInt::from_bytes_le(Sign::Plus, &h[..]);
+                let point = B8.mul_scalar(&sk);
+                let cmp_point = point.compress();
+                let dcmp_point = decompress_point(cmp_point).unwrap();
 
-    //             assert_eq!(&point.x, &dcmp_point.x);
-    //             assert_eq!(&point.y, &dcmp_point.y);
-    //         }
-    //     }
+                assert_eq!(&point.x, &dcmp_point.x);
+                assert_eq!(&point.y, &dcmp_point.y);
+            }
+        }
 
     //     #[test]
     //     fn test_signature_compress_decompress() {
