@@ -37,6 +37,7 @@ pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
 // Poseidon(16) -- 18 rounds ==>  18 * 16 = 288 , output 18 Fr
 // total preimage left ==> 18 + 10 = 28 , use poseidon(16) and poseidon(12)
 // output poseidon(2) ==> 1
+// TODO: revist to check correct params are used 
 fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
     assert!(input.len() == 298, "Input lenght must be 298 bytes");
 
@@ -332,11 +333,3 @@ mod tests {
     }
 }
 
-// pub fn to_hex<F: PrimeField>(el: &F) -> String {
-//     let repr = el.into_repr();
-//     let required_length = repr.as_ref().len() * 8;
-//     let mut buf: Vec<u8> = vec![0; required_length]; // Initialize with the correct length
-//     repr.write_be(&mut buf).unwrap();
-
-//     hex_ext::encode(&buf)
-// }
