@@ -6,7 +6,7 @@ use ark_ff::*;
 use num::BigUint;
 use num_bigint::{BigInt, ToBigInt};
 use num_traits::{One, Zero};
-use poseidon_rust::{bn254::circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS, poseidon::Poseidon};
+use poseidon_rust::poseidon::Poseidon;
 use std::str::FromStr;
 
 use crate::{

@@ -343,6 +343,7 @@ impl PrivateKey {
         let a = &self.public();
 
         let hm_input = vec![r_b8.x, r_b8.y, a.x, a.y, msg_fr];
+        //TODO: Check the param
         let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_5_PARAMS);
         let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
 
@@ -759,147 +760,147 @@ mod tests {
         assert_eq!(p.y, p2.y);
     }
 
-        #[test]
-        fn test_point_decompress0() {
-            let y_bytes_raw =
-                hex::decode("b5328f8791d48f20bec6e481d91c7ada235f1facf22547901c18656b6c3e042f")
-                    .unwrap();
-            let mut y_bytes: [u8; 32] = [0; 32];
-            y_bytes.copy_from_slice(&y_bytes_raw);
-            let p = decompress_point(y_bytes).unwrap();
+    #[test]
+    fn test_point_decompress0() {
+        let y_bytes_raw =
+            hex::decode("b5328f8791d48f20bec6e481d91c7ada235f1facf22547901c18656b6c3e042f")
+                .unwrap();
+        let mut y_bytes: [u8; 32] = [0; 32];
+        y_bytes.copy_from_slice(&y_bytes_raw);
+        let p = decompress_point(y_bytes).unwrap();
 
-            let expected_px_raw =
-                hex::decode("b86cc8d9c97daef0afe1a4753c54fb2d8a530dc74c7eee4e72b3fdf2496d2113")
-                    .unwrap();
-            let mut e_px_bytes: [u8; 32] = [0; 32];
-            e_px_bytes.copy_from_slice(&expected_px_raw);
-            let expected_px: Fr =
-                Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
-            assert_eq!(&p.x, &expected_px);
+        let expected_px_raw =
+            hex::decode("b86cc8d9c97daef0afe1a4753c54fb2d8a530dc74c7eee4e72b3fdf2496d2113")
+                .unwrap();
+        let mut e_px_bytes: [u8; 32] = [0; 32];
+        e_px_bytes.copy_from_slice(&expected_px_raw);
+        let expected_px: Fr =
+            Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
+        assert_eq!(&p.x, &expected_px);
+    }
+
+    #[test]
+    fn test_point_decompress1() {
+        let y_bytes_raw =
+            hex::decode("70552d3ff548e09266ded29b33ce75139672b062b02aa66bb0d9247ffecf1d0b")
+                .unwrap();
+        let mut y_bytes: [u8; 32] = [0; 32];
+        y_bytes.copy_from_slice(&y_bytes_raw);
+        let p = decompress_point(y_bytes).unwrap();
+
+        let expected_px_raw =
+            hex::decode("30f1635ba7d56f9cb32c3ffbe6dca508a68c7f43936af11a23c785ce98cb3404")
+                .unwrap();
+        let mut e_px_bytes: [u8; 32] = [0; 32];
+        e_px_bytes.copy_from_slice(&expected_px_raw);
+        let expected_px: Fr =
+            Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
+        assert_eq!(&p.x, &expected_px);
+    }
+
+    #[test]
+    fn test_point_decompress_loop() {
+        for _ in 0..5 {
+            let random_bytes = rand::thread_rng().gen::<[u8; 32]>();
+            let sk_raw: BigInt = BigInt::from_bytes_le(Sign::Plus, &random_bytes[..]);
+            let (_, sk_raw_bytes) = sk_raw.to_bytes_be();
+            let mut h: Vec<u8> = blh(&sk_raw_bytes);
+
+            h[0] = h[0] & 0xF8;
+            h[31] = h[31] & 0x7F;
+            h[31] = h[31] | 0x40;
+
+            let sk = BigInt::from_bytes_le(Sign::Plus, &h[..]);
+            let point = B8.mul_scalar(&sk);
+            let cmp_point = point.compress();
+            let dcmp_point = decompress_point(cmp_point).unwrap();
+
+            assert_eq!(&point.x, &dcmp_point.x);
+            assert_eq!(&point.y, &dcmp_point.y);
         }
+    }
 
-        #[test]
-        fn test_point_decompress1() {
-            let y_bytes_raw =
-                hex::decode("70552d3ff548e09266ded29b33ce75139672b062b02aa66bb0d9247ffecf1d0b")
-                    .unwrap();
-            let mut y_bytes: [u8; 32] = [0; 32];
-            y_bytes.copy_from_slice(&y_bytes_raw);
-            let p = decompress_point(y_bytes).unwrap();
+    #[test]
+    fn test_signature_compress_decompress() {
+        let sk = new_key();
+        let pk = sk.public();
 
-            let expected_px_raw =
-                hex::decode("30f1635ba7d56f9cb32c3ffbe6dca508a68c7f43936af11a23c785ce98cb3404")
-                    .unwrap();
-            let mut e_px_bytes: [u8; 32] = [0; 32];
-            e_px_bytes.copy_from_slice(&expected_px_raw);
-            let expected_px: Fr =
-                Fr::from_str(&BigInt::from_bytes_le(Sign::Plus, &e_px_bytes).to_string()).unwrap();
-            assert_eq!(&p.x, &expected_px);
+        for i in 0..5 {
+            let msg_raw = "123456".to_owned() + &i.to_string();
+            let msg = BigInt::parse_bytes(msg_raw.as_bytes(), 10).unwrap();
+            let sig = sk.sign(msg.clone()).unwrap();
+
+            let compressed_sig = sig.compress();
+            let decompressed_sig = decompress_signature(&compressed_sig).unwrap();
+            assert_eq!(&sig.r_b8.x, &decompressed_sig.r_b8.x);
+            assert_eq!(&sig.r_b8.y, &decompressed_sig.r_b8.y);
+            assert_eq!(&sig.s, &decompressed_sig.s);
+
+            let v = verify(pk.clone(), decompressed_sig, msg);
+            assert_eq!(v, true);
         }
+    }
 
-        #[test]
-        fn test_point_decompress_loop() {
-            for _ in 0..5 {
-                let random_bytes = rand::thread_rng().gen::<[u8; 32]>();
-                let sk_raw: BigInt = BigInt::from_bytes_le(Sign::Plus, &random_bytes[..]);
-                let (_, sk_raw_bytes) = sk_raw.to_bytes_be();
-                let mut h: Vec<u8> = blh(&sk_raw_bytes);
+    #[test]
+    fn test_schnorr_signature() {
+        let sk = new_key();
+        let pk = sk.public();
 
-                h[0] = h[0] & 0xF8;
-                h[31] = h[31] & 0x7F;
-                h[31] = h[31] | 0x40;
+        let msg = BigInt::parse_bytes(b"123456789012345678901234567890", 10).unwrap();
+        let (s, e) = sk.sign_schnorr(msg.clone()).unwrap();
+        let verification = verify_schnorr(pk, msg, s, e).unwrap();
+        assert_eq!(true, verification);
+    }
 
-                let sk = BigInt::from_bytes_le(Sign::Plus, &h[..]);
-                let point = B8.mul_scalar(&sk);
-                let cmp_point = point.compress();
-                let dcmp_point = decompress_point(cmp_point).unwrap();
+    #[test]
+    fn test_circomlib_testvector() {
+        let sk_raw_bytes =
+            hex::decode("0001020304050607080900010203040506070809000102030405060708090001")
+                .unwrap();
 
-                assert_eq!(&point.x, &dcmp_point.x);
-                assert_eq!(&point.y, &dcmp_point.y);
-            }
-        }
+        // test blake compatible with circomlib implementation
+        let h: Vec<u8> = blh(&sk_raw_bytes);
+        assert_eq!(hex::encode(h), "c992db23d6290c70ffcc02f7abeb00b9d00fa8b43e55d7949c28ba6be7545d3253882a61bd004a236ef1cdba01b27ba0aedfb08eefdbfb7c19657c880b43ddf1");
 
-    //     #[test]
-    //     fn test_signature_compress_decompress() {
-    //         let sk = new_key();
-    //         let pk = sk.public();
+        // test private key
+        let sk = PrivateKey::import(
+            hex::decode("0001020304050607080900010203040506070809000102030405060708090001")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            sk.scalar_key().to_string(),
+            "6466070937662820620902051049739362987537906109895538826186780010858059362905"
+        );
 
-    //         for i in 0..5 {
-    //             let msg_raw = "123456".to_owned() + &i.to_string();
-    //             let msg = BigInt::parse_bytes(msg_raw.as_bytes(), 10).unwrap();
-    //             let sig = sk.sign(msg.clone()).unwrap();
+        // test public key
+        let pk = sk.public();
+        assert_eq!(
+            pk.x.to_string(),
+            "13277427435165878497778222415993513565335242147425444199013288855685581939618"
+        );
+        assert_eq!(
+            pk.y.to_string(),
+            "13622229784656158136036771217484571176836296686641868549125388198837476602820"
+        );
 
-    //             let compressed_sig = sig.compress();
-    //             let decompressed_sig = decompress_signature(&compressed_sig).unwrap();
-    //             assert_eq!(&sig.r_b8.x, &decompressed_sig.r_b8.x);
-    //             assert_eq!(&sig.r_b8.y, &decompressed_sig.r_b8.y);
-    //             assert_eq!(&sig.s, &decompressed_sig.s);
-
-    //             let v = verify(pk.clone(), decompressed_sig, msg);
-    //             assert_eq!(v, true);
-    //         }
-    //     }
-
-    //     #[test]
-    //     fn test_schnorr_signature() {
-    //         let sk = new_key();
-    //         let pk = sk.public();
-
-    //         let msg = BigInt::parse_bytes(b"123456789012345678901234567890", 10).unwrap();
-    //         let (s, e) = sk.sign_schnorr(msg.clone()).unwrap();
-    //         let verification = verify_schnorr(pk, msg, s, e).unwrap();
-    //         assert_eq!(true, verification);
-    //     }
-
-    //     #[test]
-    //     fn test_circomlib_testvector() {
-    //         let sk_raw_bytes =
-    //             hex::decode("0001020304050607080900010203040506070809000102030405060708090001")
-    //                 .unwrap();
-
-    //         // test blake compatible with circomlib implementation
-    //         let h: Vec<u8> = blh(&sk_raw_bytes);
-    //         assert_eq!(hex::encode(h), "c992db23d6290c70ffcc02f7abeb00b9d00fa8b43e55d7949c28ba6be7545d3253882a61bd004a236ef1cdba01b27ba0aedfb08eefdbfb7c19657c880b43ddf1");
-
-    //         // test private key
-    //         let sk = PrivateKey::import(
-    //             hex::decode("0001020304050607080900010203040506070809000102030405060708090001")
-    //                 .unwrap(),
-    //         )
-    //         .unwrap();
-    //         assert_eq!(
-    //             sk.scalar_key().to_string(),
-    //             "6466070937662820620902051049739362987537906109895538826186780010858059362905"
-    //         );
-
-    //         // test public key
-    //         let pk = sk.public();
-    //         assert_eq!(
-    //             pk.x.to_string(),
-    //             "Fr(0x1d5ac1f31407018b7d413a4f52c8f74463b30e6ac2238220ad8b254de4eaa3a2)"
-    //         );
-    //         assert_eq!(
-    //             pk.y.to_string(),
-    //             "Fr(0x1e1de8a908826c3f9ac2e0ceee929ecd0caf3b99b3ef24523aaab796a6f733c4)"
-    //         );
-
-    //         // test signature & verification
-    //         let msg = BigInt::from_bytes_le(Sign::Plus, &hex::decode("00010203040506070809").unwrap());
-    //         println!("msg {:?}", msg.to_string());
-    //         let sig = sk.sign(msg.clone()).unwrap();
-    //         assert_eq!(
-    //             sig.r_b8.x.to_string(),
-    //             "Fr(0x192b4e51adf302c8139d356d0e08e2404b5ace440ef41fc78f5c4f2428df0765)"
-    //         );
-    //         assert_eq!(
-    //             sig.r_b8.y.to_string(),
-    //             "Fr(0x2202bebcf57b820863e0acc88970b6ca7d987a0d513c2ddeb42e3f5d31b4eddf)"
-    //         );
-    //         assert_eq!(
-    //             sig.s.to_string(),
-    //             "1672775540645840396591609181675628451599263765380031905495115170613215233181"
-    //         );
-    //         let v = verify(pk, sig, msg);
-    //         assert_eq!(v, true);
-    //     }
+        // test signature & verification
+        let msg = BigInt::from_bytes_le(Sign::Plus, &hex::decode("00010203040506070809").unwrap());
+        println!("msg {:?}", msg.to_string());
+        let sig = sk.sign(msg.clone()).unwrap();
+        // assert_eq!(
+        //     sig.r_b8.x.to_string(),
+        //     "11384336176656855268977457483345535180380036354188103142384839473266348197733"
+        // );
+        // assert_eq!(
+        //     sig.r_b8.y.to_string(),
+        //     "15383486972088797283337779941324724402501462225528836549661220478783371668959"
+        // );
+        // assert_eq!(
+        //     sig.s.to_string(),
+        //     "1672775540645840396591609181675628451599263765380031905495115170613215233181"
+        // );
+        let v = verify(pk, sig, msg);
+        assert_eq!(v, true);
+    }
 }
