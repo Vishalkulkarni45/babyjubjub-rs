@@ -2,7 +2,7 @@
 // For LICENSE check https://github.com/arnaucube/babyjubjub-rs
 use ark_bn254::Fr;
 use num::BigUint;
-use params::circom_t5::POSEIDON_CIRCOM_BN_5_PARAMS;
+use params::circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS;
 use poseidon_rust::poseidon::Poseidon;
 use std::str::FromStr;
 
@@ -342,9 +342,9 @@ impl PrivateKey {
         let r_b8: Point = B8.mul_scalar(&r);
         let a = &self.public();
 
-        let hm_input = vec![r_b8.x, r_b8.y, a.x, a.y, msg_fr];
+        let hm_input = vec![Fr::zero(), r_b8.x, r_b8.y, a.x, a.y, msg_fr];
         //TODO: Check the param
-        let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_5_PARAMS);
+        let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS);
         let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
 
         let mut s = &self.scalar_key() << 3;
@@ -382,8 +382,8 @@ pub fn schnorr_hash(pk: &Point, msg: BigInt, c: &Point) -> Result<BigInt, String
         return Err("msg outside the Finite Field".to_string());
     }
     let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
-    let hm_input = vec![pk.x, pk.y, c.x, c.y, msg_fr];
-    let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_5_PARAMS);
+    let hm_input = vec![Fr::zero(), pk.x, pk.y, c.x, c.y, msg_fr];
+    let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS);
     let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
 
     let hm_bu: BigUint = hm.into_bigint().into();
@@ -537,8 +537,8 @@ pub fn verify(pk: Point, sig: Signature, msg: BigInt) -> bool {
         return false;
     }
     let msg_fr: Fr = Fr::from_str(&msg.to_string()).unwrap();
-    let hm_input = vec![sig.r_b8.x, sig.r_b8.y, pk.x, pk.y, msg_fr];
-    let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_5_PARAMS);
+    let hm_input = vec![Fr::zero(), sig.r_b8.x, sig.r_b8.y, pk.x, pk.y, msg_fr];
+    let poseidon_hash_5 = Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS);
     let hm: Fr = poseidon_hash_5.permutation(hm_input).unwrap()[0];
     let hm_bu: BigUint = hm.into_bigint().into();
     let l = B8.mul_scalar(&sig.s);
@@ -888,18 +888,18 @@ mod tests {
         let msg = BigInt::from_bytes_le(Sign::Plus, &hex::decode("00010203040506070809").unwrap());
         println!("msg {:?}", msg.to_string());
         let sig = sk.sign(msg.clone()).unwrap();
-        // assert_eq!(
-        //     sig.r_b8.x.to_string(),
-        //     "11384336176656855268977457483345535180380036354188103142384839473266348197733"
-        // );
-        // assert_eq!(
-        //     sig.r_b8.y.to_string(),
-        //     "15383486972088797283337779941324724402501462225528836549661220478783371668959"
-        // );
-        // assert_eq!(
-        //     sig.s.to_string(),
-        //     "1672775540645840396591609181675628451599263765380031905495115170613215233181"
-        // );
+        assert_eq!(
+            sig.r_b8.x.to_string(),
+            "11384336176656855268977457483345535180380036354188103142384839473266348197733"
+        );
+        assert_eq!(
+            sig.r_b8.y.to_string(),
+            "15383486972088797283337779941324724402501462225528836549661220478783371668959"
+        );
+        assert_eq!(
+            sig.s.to_string(),
+            "1672775540645840396591609181675628451599263765380031905495115170613215233181"
+        );
         let v = verify(pk, sig, msg);
         assert_eq!(v, true);
     }
