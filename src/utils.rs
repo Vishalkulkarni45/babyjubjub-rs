@@ -4,17 +4,19 @@
 use ark_bn254::Fr;
 use ark_ff::*;
 use num::BigUint;
-use num_bigint::{BigInt, ToBigInt};
+use num_bigint::{BigInt, Sign, ToBigInt};
 use num_traits::{One, Zero};
 use poseidon_rust::poseidon::Poseidon;
-use std::{iter::once, str::FromStr};
+use serde::{Deserialize, Serialize};
+use serde_json::to_string;
+use std::{fs::OpenOptions, io::Write, iter::once, str::FromStr};
 
 use crate::{
     params::{
         circom_t13::POSEIDON_CIRCOM_BN_13_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
         circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS,
     },
-    SUBORDER,
+    Point, Signature, SUBORDER,
 };
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
@@ -29,9 +31,11 @@ pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
 
     let msg_hash: BigUint = compute_hash_298_bytes(msg_bytes_fr).into_bigint().into();
 
+    println!("msg_hash : {:?}",msg_hash);
+
     let msg_hash_big = msg_hash.to_bigint().unwrap();
-    let msg_hash = modulus(&msg_hash_big, &SUBORDER);
-    Ok(msg_hash)
+   // let msg_hash = modulus(&msg_hash_big, &SUBORDER);
+    Ok(msg_hash_big)
 }
 
 // Poseidon(16) -- 18 rounds ==>  18 * 16 = 288 , output 18 Fr
@@ -85,6 +89,59 @@ fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
     poseidon_hash_2
         .permutation([Fr::zero(), inter_pos_2_16, inter_pos_2_12].to_vec())
         .unwrap()[0]
+
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize,Deserialize,Debug)]
+pub struct EcdsaInput {
+    pub SmileId_data: Vec<String>,
+    pub s: String,
+    pub Tx: String,
+    pub Ty: String,
+    pub Ux: String,
+    pub Uy: String,
+    pub pubKeyX: String,
+    pub pubKeyY: String,
+    pub r_inv: Vec<String>,
+}
+fn fr_to_string(input: &Fr) -> String {
+    let in_bu: BigUint = input.into_bigint().into();
+    in_bu.to_string()
+}
+
+
+pub fn create_output(sig: &Signature, t: &Point, u: &Point, pk: &Point, data: Vec<u8>) {
+    let r_sclar: BigUint = sig.r_b8.x.into_bigint().into();
+    let r = modulus(&r_sclar.to_bigint().unwrap(), &SUBORDER);
+
+    // Compute the modular inverse of r modulo the subgroup order
+    let mut r_inv = r.modinv(&SUBORDER).unwrap();
+    r_inv = modulus(&(-r_inv), &SUBORDER);
+    let (r_inv_sign, r_inv_limbs) = r_inv.to_u64_digits();
+    println!("r_inv limbs {:?}",r_inv_limbs);
+    assert_eq!(r_inv_sign, Sign::Plus);
+    let data_str:Vec<String> = data.iter().map(u8::to_string).collect();
+    assert_eq!(data_str.len(),298);
+        let out = EcdsaInput {
+        SmileId_data: data.iter().map(u8::to_string).collect(),
+        s: sig.s.clone().to_string(),
+        Tx: fr_to_string(&t.x),
+        Ty: fr_to_string(&t.y),
+        Ux: fr_to_string(&u.x),
+        Uy: fr_to_string(&u.y),
+        pubKeyX: fr_to_string(&pk.x),
+        pubKeyY: fr_to_string(&pk.y),
+        r_inv: (0..4).map(|i| r_inv_limbs[i].to_string()).collect(),
+    };
+    let json = serde_json::to_string_pretty(&out).unwrap();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open("output.json")
+        .unwrap();
+    file.write_all(json.as_bytes()).unwrap();
 }
 
 pub fn modinv(a: &BigInt, q: &BigInt) -> Result<BigInt, String> {
