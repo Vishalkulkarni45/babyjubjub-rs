@@ -2,7 +2,10 @@
 mod tests {
     use ark_bn254::Fr;
     use ark_ff::One;
-    use babyjubjub_rs::{curve::{decompress_point, Point, PointProjective}, utils::{blh, B8}};
+    use babyjubjub_rs::{
+        curve::{decompress_point, Point, PointProjective},
+        utils::{blh, B8},
+    };
     use num::BigInt;
     use num_bigint::{Sign, ToBigInt};
     use rand::Rng;
@@ -141,7 +144,7 @@ mod tests {
             .unwrap()
         );
     }
-     #[test]
+    #[test]
     fn test_point_compress_decompress() {
         let p: Point = Point {
             x: Fr::from_str(
@@ -222,5 +225,4 @@ mod tests {
             assert_eq!(&point.y, &dcmp_point.y);
         }
     }
-
 }

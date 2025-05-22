@@ -29,9 +29,9 @@ extern crate blake;
 //TODO: Replace BigInt with BigUint
 lazy_static! {
     pub static ref D: Fr = Fr::from_str("168696").unwrap();
-    pub static ref D_BIG: BigInt = BigInt::from(168696 as u64 );
+    pub static ref D_BIG: BigInt = BigInt::from(168696_u64 );
     pub static ref A: Fr = Fr::from_str("168700").unwrap();
-    pub static ref A_BIG: BigInt = BigInt::from(168700 as u64);
+    pub static ref A_BIG: BigInt = BigInt::from(168700_u64);
     pub static ref Q: BigInt = BigInt::parse_bytes(
         b"21888242871839275222246405745257275088548364400416034343698204186575808495617",10
     )

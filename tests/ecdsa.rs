@@ -28,8 +28,6 @@ mod tests {
         assert_eq!(v, true);
     }
 
-
-
     #[test]
     fn test_schnorr_signature() {
         let sk = EdDSAPrivateKey::new_key();

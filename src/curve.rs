@@ -25,10 +25,10 @@ impl PointProjective {
 
         let zinv = self.z.inverse().unwrap();
         let mut x = self.x;
-        x = x * zinv;
+        x *= zinv;
 
         let mut y = self.y;
-        y = y * zinv;
+        y *= zinv;
 
         Point { x, y }
     }
@@ -37,40 +37,40 @@ impl PointProjective {
     pub fn add(&self, q: &PointProjective) -> PointProjective {
         // add-2008-bbjlp https://hyperelliptic.org/EFD/g1p/auto-twisted-projective.html#addition-add-2008-bbjlp
         let mut a = self.z;
-        a = a * q.z;
+        a *= q.z;
         let mut b = a;
         b = b.square();
         let mut c = self.x;
-        c = c * q.x;
+        c *= q.x;
         let mut d = self.y;
-        d = d * q.y;
+        d *= q.y;
         let mut e = *D;
-        e = e * c;
-        e = e * d;
+        e *= c;
+        e *= d;
         let mut f = b;
-        f = f - e;
+        f -= e;
         let mut g = b;
-        g = g + e;
+        g += e;
         let mut x1py1 = self.x;
-        x1py1 = x1py1 + self.y;
+        x1py1 += self.y;
         let mut x2py2 = q.x;
-        x2py2 = x2py2 + q.y;
+        x2py2 += q.y;
         let mut aux = x1py1;
-        aux = aux * x2py2;
-        aux = aux - c;
-        aux = aux - d;
+        aux *= x2py2;
+        aux -= c;
+        aux -= d;
         let mut x3 = a;
-        x3 = x3 * f;
-        x3 = x3 * aux;
+        x3 *= f;
+        x3 *= aux;
         let mut ac = *A;
-        ac = ac * c;
+        ac *= c;
         let mut dac = d;
-        dac = dac - ac;
+        dac -= ac;
         let mut y3 = a;
-        y3 = y3 * g;
-        y3 = y3 * dac;
+        y3 *= g;
+        y3 *= dac;
         let mut z3 = f;
-        z3 = z3 * g;
+        z3 *= g;
 
         PointProjective {
             x: x3,
@@ -124,7 +124,7 @@ impl Point {
         r[..len].copy_from_slice(&y_bytes[..len]);
 
         let q_shift: BigUint = Q.clone().to_biguint().unwrap() >> 1;
-        if x_big > q_shift.try_into().unwrap() {
+        if x_big > q_shift.into() {
             r[31] |= 0x80;
         }
         r
@@ -157,7 +157,7 @@ pub fn decompress_point(bb: [u8; 32]) -> Result<Point, String> {
 
     // x^2 = (1 - y^2) / (a - d * y^2) (mod p)
     let den = modinv(
-        &&modulus(
+        &modulus(
             &(A_BIG.clone() - modulus(&(D_BIG.clone() * (&y * &y)), &Q)),
             &Q,
         ),

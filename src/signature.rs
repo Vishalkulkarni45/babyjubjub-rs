@@ -1,12 +1,16 @@
+use crate::{
+    curve::{decompress_point, Point},
+    params::circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS,
+    utils::{B8, Q},
+};
 use ark_bn254::Fr;
+use ark_ff::*;
+use arrayref::array_ref;
 use num::{BigInt, BigUint};
 use num_bigint::{Sign, ToBigInt};
 use poseidon_rust::poseidon::Poseidon;
 use std::cmp::min;
-use crate::{curve::{decompress_point, Point}, params::circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS, utils::{B8, Q}};
-use arrayref::array_ref;
 use std::str::FromStr;
-use ark_ff::*;
 
 #[derive(Debug, Clone)]
 pub struct Signature {
@@ -38,8 +42,6 @@ pub fn decompress_signature(b: &[u8; 64]) -> Result<Signature, String> {
         Result::Ok(res) => Ok(Signature { r_b8: res, s }),
     }
 }
-
-
 
 pub fn schnorr_hash(pk: &Point, msg: BigInt, c: &Point) -> Result<BigInt, String> {
     if msg > Q.clone() {
