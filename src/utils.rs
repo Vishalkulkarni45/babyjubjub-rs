@@ -8,16 +8,57 @@ use num_bigint::{BigInt, Sign, ToBigInt};
 use num_traits::{One, Zero};
 use poseidon_rust::poseidon::Poseidon;
 use serde::{Deserialize, Serialize};
-use serde_json::to_string;
 use std::{fs::OpenOptions, io::Write, iter::once, str::FromStr};
 
 use crate::{
+    curve::Point,
     params::{
         circom_t13::POSEIDON_CIRCOM_BN_13_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
         circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS,
     },
-    Point, Signature, SUBORDER,
+    signature::Signature,
 };
+use lazy_static::lazy_static;
+
+#[cfg(not(feature = "aarch64"))]
+use blake_hash::Digest;
+
+#[cfg(feature = "aarch64")]
+extern crate blake;
+
+//TODO: Replace BigInt with BigUint
+lazy_static! {
+    pub static ref D: Fr = Fr::from_str("168696").unwrap();
+    pub static ref D_BIG: BigInt = BigInt::from(168696 as u64 );
+    pub static ref A: Fr = Fr::from_str("168700").unwrap();
+    pub static ref A_BIG: BigInt = BigInt::from(168700 as u64);
+    pub static ref Q: BigInt = BigInt::parse_bytes(
+        b"21888242871839275222246405745257275088548364400416034343698204186575808495617",10
+    )
+        .unwrap();
+    pub static ref B8: Point = Point {
+        x: Fr::from_str(
+               "5299619240641551281634865583518297030282874472190772894086521144482721001553",
+           )
+            .unwrap(),
+            y: Fr::from_str(
+                "16950150798460657717958625567821834550301663161624707787222815936182638968203",
+            )
+                .unwrap(),
+    };
+    pub static ref ORDER: Fr = Fr::from_str(
+        "21888242871839275222246405745257275088614511777268538073601725287587578984328",
+    )
+        .unwrap();
+
+    // SUBORDER = ORDER >> 3
+    pub static ref SUBORDER:BigInt = &BigInt::parse_bytes(
+        b"21888242871839275222246405745257275088614511777268538073601725287587578984328",
+        10,
+    )
+        .unwrap()
+        >> 3;
+}
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
@@ -31,10 +72,10 @@ pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
 
     let msg_hash: BigUint = compute_hash_298_bytes(msg_bytes_fr).into_bigint().into();
 
-    println!("msg_hash : {:?}",msg_hash);
+    println!("msg_hash : {:?}", msg_hash);
 
     let msg_hash_big = msg_hash.to_bigint().unwrap();
-   // let msg_hash = modulus(&msg_hash_big, &SUBORDER);
+    // let msg_hash = modulus(&msg_hash_big, &SUBORDER);
     Ok(msg_hash_big)
 }
 
@@ -89,11 +130,10 @@ fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
     poseidon_hash_2
         .permutation([Fr::zero(), inter_pos_2_16, inter_pos_2_12].to_vec())
         .unwrap()[0]
-
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize,Deserialize,Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EcdsaInput {
     pub SmileId_data: Vec<String>,
     pub s: String,
@@ -110,8 +150,7 @@ fn fr_to_string(input: &Fr) -> String {
     in_bu.to_string()
 }
 
-
-pub fn create_output(sig: &Signature, t: &Point, u: &Point, pk: &Point, data: Vec<u8>) {
+pub fn create_output_json(sig: &Signature, t: &Point, u: &Point, pk: &Point, data: Vec<u8>) {
     let r_sclar: BigUint = sig.r_b8.x.into_bigint().into();
     let r = modulus(&r_sclar.to_bigint().unwrap(), &SUBORDER);
 
@@ -119,11 +158,11 @@ pub fn create_output(sig: &Signature, t: &Point, u: &Point, pk: &Point, data: Ve
     let mut r_inv = r.modinv(&SUBORDER).unwrap();
     r_inv = modulus(&(-r_inv), &SUBORDER);
     let (r_inv_sign, r_inv_limbs) = r_inv.to_u64_digits();
-    println!("r_inv limbs {:?}",r_inv_limbs);
+    println!("r_inv limbs {:?}", r_inv_limbs);
     assert_eq!(r_inv_sign, Sign::Plus);
-    let data_str:Vec<String> = data.iter().map(u8::to_string).collect();
-    assert_eq!(data_str.len(),298);
-        let out = EcdsaInput {
+    let data_str: Vec<String> = data.iter().map(u8::to_string).collect();
+    assert_eq!(data_str.len(), 298);
+    let out = EcdsaInput {
         SmileId_data: data.iter().map(u8::to_string).collect(),
         s: sig.s.clone().to_string(),
         Tx: fr_to_string(&t.x),
@@ -164,78 +203,40 @@ pub fn modinv(a: &BigInt, q: &BigInt) -> Result<BigInt, String> {
     Ok(xy.0)
 }
 
-/*
-pub fn modinv_v2(a0: &BigInt, m0: &BigInt) -> BigInt {
-    if m0 == &One::one() {
-        return One::one();
-    }
-
-    let (mut a, mut m, mut x0, mut inv): (BigInt, BigInt, BigInt, BigInt) =
-        (a0.clone(), m0.clone(), Zero::zero(), One::one());
-
-    while a > One::one() {
-        inv = inv - (&a / m.clone()) * x0.clone();
-        a = a % m.clone();
-        std::mem::swap(&mut a, &mut m);
-        std::mem::swap(&mut x0, &mut inv);
-    }
-
-    if inv < Zero::zero() {
-        inv += m0.clone()
-    }
-    inv
+#[cfg(not(feature = "aarch64"))]
+pub fn blh(b: &[u8]) -> Vec<u8> {
+    let hash = blake_hash::Blake512::digest(b);
+    hash.to_vec()
 }
 
-pub fn modinv_v3(a: &BigInt, q: &BigInt) -> BigInt {
-    let mut aa: BigInt = a.clone();
-    let mut qq: BigInt = q.clone();
-    if qq < Zero::zero() {
-        qq = -qq;
-    }
-    if aa < Zero::zero() {
-        aa = -aa;
-    }
-    let d = num::Integer::gcd(&aa, &qq);
-    if d != One::one() {
-        println!("ERR no mod_inv");
-    }
-    let res: BigInt;
-    if d < Zero::zero() {
-        res = d + qq;
-    } else {
-        res = d;
-    }
-    res
+#[cfg(feature = "aarch64")]
+pub fn blh(b: &[u8]) -> Vec<u8> {
+    let mut hash = [0; 64];
+    blake::hash(512, b, &mut hash).unwrap();
+    hash.to_vec()
 }
-pub fn modinv_v4(x: &BigInt, q: &BigInt) -> BigInt {
-    let (gcd, inverse, _) = extended_gcd(x.clone(), q.clone());
-    let one: BigInt = One::one();
-    if gcd == one {
-        modulus(&inverse, q)
-    } else {
-        panic!("error: gcd!=one")
-    }
+
+#[allow(non_snake_case)]
+pub fn get_eff_ecdsa_args(msg: Vec<u8>, sig: Signature) -> (Point, Point) {
+    // Compute the hash of the message as a scalar
+    let msg_hash = get_msg_hash(msg).unwrap();
+
+    // Recover r from the signature's R point x-coordinate, reduced modulo the subgroup order
+    let r_sclar: BigUint = sig.r_b8.x.into_bigint().into();
+    let r = modulus(&r_sclar.to_bigint().unwrap(), &SUBORDER);
+
+    // Compute the modular inverse of r modulo the subgroup order
+    let r_inv = r.modinv(&SUBORDER).unwrap();
+
+    // T = R * r_inv, where R is the signature's R point
+    let T = sig.r_b8.mul_scalar(&r_inv);
+
+    // U = G * (-r_inv * msg_hash mod n), where G is the generator
+    let U = B8.mul_scalar(&(modulus(&(-r_inv * msg_hash), &SUBORDER)));
+
+    // Return the two points (T, U) for efficient ECDSA verification
+    (T, U)
 }
-pub fn extended_gcd(a: BigInt, b: BigInt) -> (BigInt, BigInt, BigInt) {
-    let (mut s, mut old_s) = (BigInt::zero(), BigInt::one());
-    let (mut t, mut old_t) = (BigInt::one(), BigInt::zero());
-    let (mut r, mut old_r) = (b, a);
-
-    while r != BigInt::zero() {
-        let quotient = &old_r / &r;
-        old_r -= &quotient * &r;
-        std::mem::swap(&mut old_r, &mut r);
-        old_s -= &quotient * &s;
-        std::mem::swap(&mut old_s, &mut s);
-        old_t -= quotient * &t;
-        std::mem::swap(&mut old_t, &mut t);
-    }
-
-    let _quotients = (t, s); // == (a, b) / gcd
-
-    (old_r, old_s, old_t)
-}
-*/
 
 pub fn concatenate_arrays<T: Clone>(x: &[T], y: &[T]) -> Vec<T> {
     x.iter().chain(y).cloned().collect()
@@ -356,51 +357,4 @@ pub fn legendre_symbol(a: &BigInt, q: &BigInt) -> i32 {
         return -1;
     }
     1
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::Rng;
-    #[test]
-    fn test_mod_inverse() {
-        let a = BigInt::parse_bytes(b"123456789123456789123456789123456789123456789", 10).unwrap();
-        let b = BigInt::parse_bytes(b"12345678", 10).unwrap();
-        assert_eq!(
-            modinv(&a, &b).unwrap(),
-            BigInt::parse_bytes(b"641883", 10).unwrap()
-        );
-    }
-
-    #[test]
-    fn test_sqrtmod() {
-        let a = BigInt::parse_bytes(
-            b"6536923810004159332831702809452452174451353762940761092345538667656658715568",
-            10,
-        )
-        .unwrap();
-        let q = BigInt::parse_bytes(
-            b"7237005577332262213973186563042994240857116359379907606001950938285454250989",
-            10,
-        )
-        .unwrap();
-
-        assert_eq!(
-            (modsqrt(&a, &q).unwrap()).to_string(),
-            "5464794816676661649783249706827271879994893912039750480019443499440603127256"
-        );
-        assert_eq!(
-            (modsqrt_v2(&a, &q).unwrap()).to_string(),
-            "5464794816676661649783249706827271879994893912039750480019443499440603127256"
-        );
-    }
-    #[test]
-    fn test_get_msg_hash() {
-        let mut rng = rand::thread_rng();
-        let random_input: Vec<Fr> = (0..298)
-            .map(|_| Fr::from_str(&rng.gen::<u8>().to_string()).unwrap())
-            .collect();
-        let msg_hash = compute_hash_298_bytes(random_input);
-        println!("hash : {:?}", msg_hash);
-    }
 }
