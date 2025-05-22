@@ -1,3 +1,4 @@
+pub mod circom_t11;
 pub mod circom_t13;
 pub mod circom_t17;
 pub mod circom_t3;

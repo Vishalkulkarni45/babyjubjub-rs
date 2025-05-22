@@ -1,12 +1,16 @@
 #[cfg(test)]
 mod tests {
     use babyjubjub_rs::{
-        key::{verify, EdDSAPrivateKey},
+        key::{verify, ECDSAPrivateKey, EdDSAPrivateKey},
         signature::decompress_signature,
-        utils::{get_msg_hash, modinv, modsqrt, modsqrt_v2, modulus, EcdsaInput, SUBORDER},
+        utils::{
+            create_output_json, get_eff_ecdsa_args, get_msg_hash, modinv, modsqrt, modsqrt_v2,
+            modulus, EcdsaInput, SUBORDER,
+        },
     };
     use num::BigInt;
     use num_bigint::Sign;
+    use rand::Rng;
 
     #[test]
     fn test_mod_inverse() {
@@ -41,33 +45,14 @@ mod tests {
         );
     }
     #[test]
-    fn test_output_json_ecdsa() {
-        //read data from output.json
-        let data = std::fs::read_to_string("output.json").unwrap();
-        let input: EcdsaInput = serde_json::from_str(&data).unwrap();
-
-        let msg: Vec<u8> = input
-            .SmileId_data
-            .iter()
-            .map(|x| x.parse::<u8>().unwrap())
-            .collect();
-        //   println!("msg: {:?}", msg);
-        let msg_hash = get_msg_hash(msg).unwrap();
-        println!("msg_hash_limbs:{:?}", msg_hash.to_u64_digits());
-        let r_inv: Vec<u64> = input
-            .r_inv
-            .iter()
-            .map(|x| x.parse::<u64>().unwrap())
-            .collect();
-        let mut bytes = Vec::with_capacity(r_inv.len() * 8);
-        for limb in &r_inv {
-            bytes.extend_from_slice(&limb.to_le_bytes());
-        }
-
-        let r_inv = BigInt::from_bytes_le(Sign::Plus, &bytes[..]);
-        let res = modulus(&(msg_hash * r_inv), &SUBORDER);
-
-        println!("res: {:?}", res.to_u64_digits());
+    fn test_creat_output_json_ecdsa() {
+        let sk = ECDSAPrivateKey::new_key();
+        let pk = sk.public_key();
+        let mut rng = rand::thread_rng();
+        let msg: Vec<u8> = (0..298).map(|_| rng.gen::<u8>() % 128).collect();
+        let sig = sk.sign_ecdsa(msg.clone()).unwrap();
+        let (t, u) = get_eff_ecdsa_args(msg.clone(), sig.clone());
+        create_output_json(&sig, &t, &u, &pk, msg);
     }
     #[test]
     fn test_signature_compress_decompress() {

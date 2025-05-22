@@ -10,14 +10,7 @@ use poseidon_rust::poseidon::Poseidon;
 use serde::{Deserialize, Serialize};
 use std::{fs::OpenOptions, io::Write, iter::once, str::FromStr};
 
-use crate::{
-    curve::Point,
-    params::{
-        circom_t13::POSEIDON_CIRCOM_BN_13_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
-        circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS,
-    },
-    signature::Signature,
-};
+use crate::{curve::Point, params::circom_t11::POSEIDON_CIRCOM_BN_11_PARAMS, signature::Signature};
 use lazy_static::lazy_static;
 
 #[cfg(not(feature = "aarch64"))]
@@ -58,78 +51,71 @@ lazy_static! {
     )
         .unwrap()
         >> 3;
+    pub static ref MAX_BYTES_IN_FIELD: usize = 31_usize;
 }
 
 pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
 
+//Cur only of msg_len = 298 bytes
 pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
-    let msg_bytes_fr = msg_bytes
-        .into_iter()
-        .map(|x| Fr::from_str(&x.to_string()).unwrap())
+    let msg_packed = pack_bytes_array(msg_bytes.clone())
+        .iter()
+        .map(|big| Fr::from_str(&big.to_string()).unwrap())
         .collect::<Vec<Fr>>();
+    assert_eq!(msg_packed.len(), 10);
 
-    let msg_hash: BigUint = compute_hash_298_bytes(msg_bytes_fr).into_bigint().into();
-
-    println!("msg_hash : {:?}", msg_hash);
-
-    let msg_hash_big = msg_hash.to_bigint().unwrap();
-    // let msg_hash = modulus(&msg_hash_big, &SUBORDER);
-    Ok(msg_hash_big)
+    let hasher = Poseidon::new(&POSEIDON_CIRCOM_BN_11_PARAMS);
+    let msg_hash: Fr = hasher
+        .permutation(
+            once(Fr::zero())
+                .chain(msg_packed.iter().cloned())
+                .collect::<Vec<Fr>>(),
+        )
+        .unwrap()[0];
+    let msg_hash_bu: BigUint = msg_hash.into_bigint().into();
+    Ok(msg_hash_bu.to_bigint().unwrap())
 }
 
-// Poseidon(16) -- 18 rounds ==>  18 * 16 = 288 , output 18 Fr
-// total preimage left ==> 18 + 10 = 28 , use poseidon(16) and poseidon(12)
-// output poseidon(2) ==> 1
-// TODO: revist to check correct params are used
-fn compute_hash_298_bytes(input: Vec<Fr>) -> Fr {
-    assert!(input.len() == 298, "Input lenght must be 298 bytes");
+fn compute_int_chunk_length(byte_len: usize) -> usize {
+    let pack_size = *MAX_BYTES_IN_FIELD;
+    let remain = byte_len % pack_size;
+    let mut num_chunks = (byte_len - remain) / pack_size;
+    if remain > 0 {
+        num_chunks += 1;
+    }
+    num_chunks
+}
 
-    let poseidon_hash_16 = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
-    let mut inter_pos_1_16 = Vec::<Fr>::with_capacity(18);
+pub fn pack_bytes_array(unpacked: Vec<u8>) -> Vec<BigInt> {
+    let pack_size = *MAX_BYTES_IN_FIELD;
+    let max_bytes = unpacked.len();
+    let max_ints = compute_int_chunk_length(max_bytes);
+    let mut out: Vec<BigInt> = vec![BigInt::zero(); max_ints];
 
-    for chunk in input[..288].chunks(16) {
-        inter_pos_1_16.push(
-            poseidon_hash_16
-                .permutation(
-                    once(Fr::zero())
-                        .chain(chunk.iter().cloned())
-                        .collect::<Vec<Fr>>(),
-                )
-                .unwrap()[0],
-        )
+    for i in 0..max_ints {
+        let mut sum = BigInt::zero();
+        for j in 0..pack_size {
+            let idx = pack_size * i + j;
+
+            // Copy previous value if out of bounds
+            if idx >= max_bytes {
+                continue;
+            }
+            // First item of chunk is byte itself
+            else if j == 0 {
+                sum = BigInt::from(unpacked[idx]);
+            }
+            // Every other item is 256^j * byte
+            else {
+                sum += (1 << (8 * j)) * BigInt::from(unpacked[idx]);
+            }
+        }
+        out[i] = sum;
     }
 
-    let inter_pos_2_16 = poseidon_hash_16
-        .permutation(
-            once(Fr::zero())
-                .chain(inter_pos_1_16[0..16].iter().cloned())
-                .collect::<Vec<Fr>>(),
-        )
-        .unwrap()[0];
-
-    //Replace params with 12
-    let poseidon_hash_12 = Poseidon::new(&POSEIDON_CIRCOM_BN_13_PARAMS);
-    let inter_pos_2_12 = poseidon_hash_12
-        .permutation(
-            once(Fr::zero())
-                .chain(
-                    inter_pos_1_16[16..]
-                        .iter()
-                        .chain(input[18 * 16..].iter())
-                        .cloned(),
-                )
-                .collect::<Vec<Fr>>(),
-        )
-        .unwrap()[0];
-
-    //Replace params with 2
-    let poseidon_hash_2 = Poseidon::new(&POSEIDON_CIRCOM_BN_3_PARAMS);
-
-    poseidon_hash_2
-        .permutation([Fr::zero(), inter_pos_2_16, inter_pos_2_12].to_vec())
-        .unwrap()[0]
+    out
 }
 
 #[allow(non_snake_case)]
