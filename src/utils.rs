@@ -65,7 +65,6 @@ pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
         .map(|big| Fr::from_str(&big.to_string()).unwrap())
         .collect::<Vec<Fr>>();
     assert_eq!(msg_packed.len(), 10);
-
     let hasher = Poseidon::new(&POSEIDON_CIRCOM_BN_11_PARAMS);
     let msg_hash: Fr = hasher
         .permutation(
@@ -109,7 +108,7 @@ pub fn pack_bytes_array(unpacked: Vec<u8>) -> Vec<BigInt> {
             }
             // Every other item is 256^j * byte
             else {
-                sum += (1 << (8 * j)) * BigInt::from(unpacked[idx]);
+               sum += (BigInt::from(1) << (8 * j)) * BigInt::from(unpacked[idx]);
             }
         }
         out[i] = sum;
