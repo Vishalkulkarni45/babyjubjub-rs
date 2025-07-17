@@ -2,7 +2,7 @@ use crate::{
     curve::Point,
     params::circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS,
     signature::{schnorr_hash, Signature},
-    utils::{blh, concatenate_arrays, get_msg_hash, modulus, B8, Q, SUBORDER},
+    utils::{blh, concatenate_arrays, custom_hasher, get_msg_hash, modulus, B8, Q, SUBORDER},
 };
 use ark_bn254::Fr;
 use ark_ff::*;
@@ -130,7 +130,9 @@ impl ECDSAPrivateKey {
         }
     }
     pub fn import(key: BigInt) -> Self {
-        Self { key }
+        Self {
+            key: modulus(&key, &SUBORDER),
+        }
     }
 
     pub fn public_key(&self) -> Point {
@@ -140,22 +142,17 @@ impl ECDSAPrivateKey {
     // Cur built to support only msg of len 298 bytes
     #[allow(non_snake_case)]
     pub fn sign_ecdsa(&self, msg: Vec<u8>) -> Result<Signature, String> {
-        // Convert the message and key to byte arrays
-        let (_, key_bytes) = self.key.to_bytes_le();
-
         // Hash the message bytes
-        // No need to use pack_bytes_and_poseidon here as we are using blh for deterministic nonce and not used in circuit
-        // blh is safer than poseidon for deterministic nonce
-        let h: Vec<u8> = blh(&msg);
+        let msg_hash = get_msg_hash(msg.clone())?;
+        let msg_hash_fr: Fr = Fr::from_str(&msg_hash.to_string()).unwrap();
 
         // Concatenate key bytes and message hash to form the preimage for k
-        let k_preimage = concatenate_arrays(&key_bytes, &h);
+        let k_hash = custom_hasher(&[msg_hash_fr, Fr::from_str(&self.key.to_string()).unwrap()])?;
+        let k_hash_bu: BigUint = k_hash.into_bigint().into();
+        let k_hash_b = k_hash_bu.to_bigint().unwrap();
 
         // Deterministically generate the nonce k and reduce it modulo the subgroup order
-        let k = modulus(
-            &BigInt::from_bytes_le(Sign::Plus, &blh(&k_preimage)),
-            &SUBORDER,
-        );
+        let k = modulus(&k_hash_b, &SUBORDER);
 
         // Calculate the curve point R = k * G
         let R = B8.mul_scalar(&k);
@@ -177,9 +174,6 @@ impl ECDSAPrivateKey {
 
         // Sanity check: k * k_inv mod n == 1
         assert_eq!(modulus(&(k_inv.clone() * k), &SUBORDER), BigInt::one());
-
-        // Hash the message to a scalar
-        let msg_hash = get_msg_hash(msg)?;
 
         // Compute s = k_inv * (msg_hash + r * key) mod n
         let s = modulus(

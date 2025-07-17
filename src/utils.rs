@@ -71,7 +71,6 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
 
-//Cur only of msg_len = 298 bytes
 pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
     let msg_hash: Fr = pack_bytes_and_poseidon(&msg_bytes)?;
     let msg_hash_bu: BigUint = msg_hash.into_bigint().into();
