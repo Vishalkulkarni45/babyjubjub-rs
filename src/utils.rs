@@ -10,7 +10,20 @@ use poseidon_rust::poseidon::Poseidon;
 use serde::{Deserialize, Serialize};
 use std::{fs::OpenOptions, io::Write, iter::once, str::FromStr};
 
-use crate::{curve::Point, params::circom_t11::POSEIDON_CIRCOM_BN_11_PARAMS, signature::Signature};
+use crate::{
+    curve::Point,
+    params::{
+        circom_t10::POSEIDON_CIRCOM_BN_10_PARAMS, circom_t11::POSEIDON_CIRCOM_BN_11_PARAMS,
+        circom_t12::POSEIDON_CIRCOM_BN_12_PARAMS, circom_t13::POSEIDON_CIRCOM_BN_13_PARAMS,
+        circom_t14::POSEIDON_CIRCOM_BN_14_PARAMS, circom_t15::POSEIDON_CIRCOM_BN_15_PARAMS,
+        circom_t16::POSEIDON_CIRCOM_BN_16_PARAMS, circom_t17::POSEIDON_CIRCOM_BN_17_PARAMS,
+        circom_t2::POSEIDON_CIRCOM_BN_2_PARAMS, circom_t3::POSEIDON_CIRCOM_BN_3_PARAMS,
+        circom_t4::POSEIDON_CIRCOM_BN_4_PARAMS, circom_t5::POSEIDON_CIRCOM_BN_5_PARAMS,
+        circom_t6::POSEIDON_CIRCOM_BN_6_PARAMS, circom_t7::POSEIDON_CIRCOM_BN_7_PARAMS,
+        circom_t8::POSEIDON_CIRCOM_BN_8_PARAMS, circom_t9::POSEIDON_CIRCOM_BN_9_PARAMS,
+    },
+    signature::Signature,
+};
 use lazy_static::lazy_static;
 
 #[cfg(not(feature = "aarch64"))]
@@ -74,7 +87,7 @@ pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
         )
         .unwrap()[0];
     let msg_hash_bu: BigUint = msg_hash.into_bigint().into();
-    Ok(msg_hash_bu.to_bigint().unwrap())
+    Ok(modulus(&msg_hash_bu.to_bigint().unwrap(), &SUBORDER))
 }
 
 fn compute_int_chunk_length(byte_len: usize) -> usize {
@@ -108,7 +121,7 @@ pub fn pack_bytes_array(unpacked: Vec<u8>) -> Vec<BigInt> {
             }
             // Every other item is 256^j * byte
             else {
-               sum += (BigInt::from(1) << (8 * j)) * BigInt::from(unpacked[idx]);
+                sum += (BigInt::from(1) << (8 * j)) * BigInt::from(unpacked[idx]);
             }
         }
         out[i] = sum;
@@ -225,6 +238,111 @@ pub fn get_eff_ecdsa_args(msg: Vec<u8>, sig: Signature) -> (Point, Point) {
 
 pub fn concatenate_arrays<T: Clone>(x: &[T], y: &[T]) -> Vec<T> {
     x.iter().chain(y).cloned().collect()
+}
+
+fn get_poseidon_hasher(k: usize) -> Poseidon<Fr> {
+    match k {
+        2 => Poseidon::new(&POSEIDON_CIRCOM_BN_2_PARAMS),
+        3 => Poseidon::new(&POSEIDON_CIRCOM_BN_3_PARAMS),
+        4 => Poseidon::new(&POSEIDON_CIRCOM_BN_4_PARAMS),
+        5 => Poseidon::new(&POSEIDON_CIRCOM_BN_5_PARAMS),
+        6 => Poseidon::new(&POSEIDON_CIRCOM_BN_6_PARAMS),
+        7 => Poseidon::new(&POSEIDON_CIRCOM_BN_7_PARAMS),
+        8 => Poseidon::new(&POSEIDON_CIRCOM_BN_8_PARAMS),
+        9 => Poseidon::new(&POSEIDON_CIRCOM_BN_9_PARAMS),
+        10 => Poseidon::new(&POSEIDON_CIRCOM_BN_10_PARAMS),
+        11 => Poseidon::new(&POSEIDON_CIRCOM_BN_11_PARAMS),
+        12 => Poseidon::new(&POSEIDON_CIRCOM_BN_12_PARAMS),
+        13 => Poseidon::new(&POSEIDON_CIRCOM_BN_13_PARAMS),
+        14 => Poseidon::new(&POSEIDON_CIRCOM_BN_14_PARAMS),
+        15 => Poseidon::new(&POSEIDON_CIRCOM_BN_15_PARAMS),
+        16 => Poseidon::new(&POSEIDON_CIRCOM_BN_16_PARAMS),
+        17 => Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS),
+        _ => panic!("Unsupported input length: {}", k),
+    }
+}
+
+/// Custom hasher function that mimics the Circom CustomHasher template
+/// If k < 16, uses a single Poseidon hash
+/// If k >= 16, chunks inputs into groups of 16, hashes each chunk, then hashes the results
+pub fn custom_hasher(inputs: &[Fr]) -> Result<Fr, String> {
+    let k = inputs.len();
+
+    if k < 16 {
+        let hasher = get_poseidon_hasher(k + 1);
+
+        // If k is less than 16, use a single poseidon hash
+        let mut hash_inputs = vec![Fr::zero()]; // Poseidon typically needs a capacity element
+        hash_inputs.extend_from_slice(inputs);
+
+        let result = hasher
+            .permutation(hash_inputs)
+            .map_err(|e| format!("Poseidon hashing failed: {:?}", e))?;
+        Ok(result[0])
+    } else {
+        // Do up to 16 rounds of poseidon
+        let rounds = k.div_ceil(16);
+        if rounds >= 17 {
+            return Err("Too many rounds (>= 17)".to_string());
+        }
+
+        let mut chunk_hashes = Vec::new();
+        let hasher = Poseidon::new(&POSEIDON_CIRCOM_BN_17_PARAMS);
+
+        // Hash each chunk of 16 elements
+        for i in 0..rounds {
+            // Build the 17-element input vector: 1 capacity + up to 16 data elements, padded with zeros.
+            let start = i * 16;
+            let end = usize::min(start + 16, k);
+
+            // Pre-allocate exact capacity to avoid reallocations.
+            let mut chunk_inputs = Vec::with_capacity(17);
+            chunk_inputs.push(Fr::zero()); // Capacity element
+            chunk_inputs.extend_from_slice(&inputs[start..end]);
+
+            // Pad the remaining slots (if any) with zeros so we always hash exactly 17 elements.
+            chunk_inputs.resize(17, Fr::zero());
+
+            let chunk_result = hasher
+                .permutation(chunk_inputs)
+                .map_err(|e| format!("Poseidon chunk hashing failed: {:?}", e))?;
+            chunk_hashes.push(chunk_result[0]);
+        }
+
+        // Hash all chunk results together
+        let mut final_inputs = vec![Fr::zero()]; // Capacity element
+        final_inputs.extend(chunk_hashes);
+
+        let final_hasher = get_poseidon_hasher(rounds + 1);
+
+        let final_result = final_hasher
+            .permutation(final_inputs)
+            .map_err(|e| format!("Poseidon final hashing failed: {:?}", e))?;
+        Ok(final_result[0])
+    }
+}
+
+/// Packs a byte array and hashes it with Poseidon, mirroring the Circom
+/// `PackBytesAndPoseidon` template.
+///
+/// * `bytes` – raw bytes to be packed.
+///
+/// Returns the Poseidon hash of the packed field elements or an error if the
+/// hashing fails.
+pub fn pack_bytes_and_poseidon(bytes: &[u8]) -> Result<Fr, String> {
+    // Convert the incoming bytes into field‐sized integers.
+    let packed_bigints = pack_bytes_array(bytes.to_vec());
+
+    // Convert each BigInt chunk into a field element.
+    let mut packed_fr = Vec::with_capacity(packed_bigints.len());
+    for big in packed_bigints {
+        let fr = Fr::from_str(&big.to_string())
+            .map_err(|_| "Failed to convert chunk into field element".to_string())?;
+        packed_fr.push(fr);
+    }
+
+    // Hash using the same custom hasher employed by the Circom template.
+    custom_hasher(&packed_fr)
 }
 
 #[allow(clippy::many_single_char_names)]

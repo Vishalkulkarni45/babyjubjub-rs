@@ -55,7 +55,7 @@ mod tests {
         create_output_json(&sig, &t, &u, &pk, msg);
     }
 
-      #[test]
+    #[test]
     fn test_read_output_json_ecdsa() {
         //read data from output.json
         let data = std::fs::read_to_string("output.json").unwrap();
