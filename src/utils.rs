@@ -8,7 +8,7 @@ use num_bigint::{BigInt, Sign, ToBigInt};
 use num_traits::{One, Zero};
 use poseidon_rust::poseidon::Poseidon;
 use serde::{Deserialize, Serialize};
-use std::{fs::OpenOptions, io::Write, iter::once, str::FromStr};
+use std::{fs::OpenOptions, io::Write, str::FromStr};
 
 use crate::{
     curve::Point,
@@ -73,19 +73,7 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
 
 //Cur only of msg_len = 298 bytes
 pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
-    let msg_packed = pack_bytes_array(msg_bytes.clone())
-        .iter()
-        .map(|big| Fr::from_str(&big.to_string()).unwrap())
-        .collect::<Vec<Fr>>();
-    assert_eq!(msg_packed.len(), 10);
-    let hasher = Poseidon::new(&POSEIDON_CIRCOM_BN_11_PARAMS);
-    let msg_hash: Fr = hasher
-        .permutation(
-            once(Fr::zero())
-                .chain(msg_packed.iter().cloned())
-                .collect::<Vec<Fr>>(),
-        )
-        .unwrap()[0];
+    let msg_hash: Fr = pack_bytes_and_poseidon(&msg_bytes)?;
     let msg_hash_bu: BigUint = msg_hash.into_bigint().into();
     Ok(modulus(&msg_hash_bu.to_bigint().unwrap(), &SUBORDER))
 }

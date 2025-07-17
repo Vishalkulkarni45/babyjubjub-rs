@@ -144,6 +144,8 @@ impl ECDSAPrivateKey {
         let (_, key_bytes) = self.key.to_bytes_le();
 
         // Hash the message bytes
+        // No need to use pack_bytes_and_poseidon here as we are using blh for deterministic nonce and not used in circuit
+        // blh is safer than poseidon for deterministic nonce
         let h: Vec<u8> = blh(&msg);
 
         // Concatenate key bytes and message hash to form the preimage for k
