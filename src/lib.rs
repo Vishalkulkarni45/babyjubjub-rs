@@ -404,7 +404,7 @@ pub fn verify_schnorr(pk: Point, m: BigInt, r: Point, s: BigInt) -> Result<bool,
 
 // Cur built to support only msg of len 298 bytes
 #[allow(non_snake_case)]
-pub fn sign_ecdsa(msg: Vec<u8>, key: BigInt) -> Result<Signature, String> {
+pub fn sign_ecdsa(msg: &Vec<u8>, key: BigInt) -> Result<Signature, String> {
     // Convert the message and key to byte arrays
     let (_, key_bytes) = key.to_bytes_le();
 
@@ -442,7 +442,7 @@ pub fn sign_ecdsa(msg: Vec<u8>, key: BigInt) -> Result<Signature, String> {
     assert_eq!(modulus(&(k_inv.clone() * k), &SUBORDER), BigInt::one());
 
     // Hash the message to a scalar
-    let msg_hash = get_msg_hash(msg)?;
+    let msg_hash = get_msg_hash(&msg)?;
 
     // Compute s = k_inv * (msg_hash + r * key) mod n
     let s = modulus(&(k_inv * (msg_hash + r_scalar * key)), &SUBORDER);
@@ -459,7 +459,7 @@ pub fn sign_ecdsa(msg: Vec<u8>, key: BigInt) -> Result<Signature, String> {
 #[allow(non_snake_case)]
 pub fn get_eff_ecdsa_args(msg: Vec<u8>, sig: Signature) -> (Point, Point) {
     // Compute the hash of the message as a scalar
-    let msg_hash = get_msg_hash(msg).unwrap();
+    let msg_hash = get_msg_hash(&msg).unwrap();
 
     // Recover r from the signature's R point x-coordinate, reduced modulo the subgroup order
     let r_sclar: BigUint = sig.r_b8.x.into_bigint().into();
@@ -478,8 +478,8 @@ pub fn get_eff_ecdsa_args(msg: Vec<u8>, sig: Signature) -> (Point, Point) {
     (T, U)
 }
 
-pub fn verify_ecdsa(msg: Vec<u8>, sig: Signature, pk: Point) -> bool {
-    let msg_hash = get_msg_hash(msg).unwrap();
+pub fn verify_ecdsa(msg: &Vec<u8>, sig: Signature, pk: Point) -> bool {
+    let msg_hash = get_msg_hash(&msg).unwrap();
 
     let s_inv = match sig.s.modinv(&SUBORDER) {
         Some(s_inv) => s_inv,
@@ -719,8 +719,8 @@ mod tests {
             let mut rng = rand::thread_rng();
             let msg: Vec<u8> = (0..298).map(|_| rng.gen::<u8>()).collect();
 
-            let sig = sign_ecdsa(msg.clone(), sk).unwrap();
-            verify_ecdsa(msg.clone(), sig.clone(), pk.clone());
+            let sig = sign_ecdsa(&msg, sk).unwrap();
+            verify_ecdsa(&msg, sig.clone(), pk.clone());
         }
     }
 
@@ -732,7 +732,7 @@ mod tests {
 
             let mut rng = rand::thread_rng();
             let msg: Vec<u8> = (0..298).map(|_| rng.gen::<u8>()).collect();
-            let sig = sign_ecdsa(msg.clone(), sk).unwrap();
+            let sig = sign_ecdsa(&msg, sk).unwrap();
             let (t, u) = get_eff_ecdsa_args(msg, sig.clone());
             verify_eff_ecdsa(sig, t, u, pk);
         }

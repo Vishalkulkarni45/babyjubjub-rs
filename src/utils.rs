@@ -21,7 +21,7 @@ pub fn modulus(a: &BigInt, m: &BigInt) -> BigInt {
     ((a % m) + m) % m
 }
 
-pub fn get_msg_hash(msg_bytes: Vec<u8>) -> Result<BigInt, String> {
+pub fn get_msg_hash(msg_bytes: &Vec<u8>) -> Result<BigInt, String> {
     let msg_bytes_fr = msg_bytes
         .into_iter()
         .map(|x| Fr::from_str(&x.to_string()).unwrap())
